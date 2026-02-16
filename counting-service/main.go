@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
@@ -30,7 +31,10 @@ func main() {
 	}
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr: redisURL,
+		Addr:         redisURL,
+		DialTimeout:  time.Second,
+		ReadTimeout:  time.Second,
+		WriteTimeout: time.Second,
 	})
 
 	// Ping Redis to ensure connection
