@@ -1,4 +1,4 @@
-# Demo Consul 101
+# Dashboard-Counting
 
 This repository contains a demonstration of a microservices architecture using Consul for service discovery. It consists of two main services: `counting-service` and `dashboard-service`.
 
