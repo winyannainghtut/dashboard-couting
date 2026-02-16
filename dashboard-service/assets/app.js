@@ -79,8 +79,26 @@ function showCount(message) {
     message.dashboard_hostname;
 
   var redisHostEl = document.getElementById("redis-hostname");
-  if (redisHostEl) {
+  var pgHostEl = document.getElementById("pg-hostname");
+  var redisCard = document.getElementById("redis-card");
+  var pgCard = document.getElementById("pg-card");
+
+  var mode = message.storage_mode || "redis";
+
+  if (mode === "postgres") {
+    // PostgreSQL is active
+    pgHostEl.textContent = message.pg_host || "Connected";
+    pgCard.classList.remove("inactive-card");
+    // Redis is not in use
+    redisHostEl.textContent = "Redis is not in use";
+    redisCard.classList.add("inactive-card");
+  } else {
+    // Redis is active
     redisHostEl.textContent = message.redis_host || "Unknown";
+    redisCard.classList.remove("inactive-card");
+    // PostgreSQL is not in use
+    pgHostEl.textContent = "PostgreSQL is not in use";
+    pgCard.classList.add("inactive-card");
   }
 }
 

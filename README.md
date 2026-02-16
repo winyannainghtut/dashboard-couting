@@ -9,17 +9,28 @@ A backend service written in Go regarding counting logic.
 - **Port**: 9001 (default)
 - **Path**: `/counting-service`
 - **Configuration**:
-  - `PORT`: Service port (default: 9001).
-  - `STORAGE_MODE`: `redis` (default), `memory`, or `postgres`.
-  - **Redis Options:**
-    - `REDIS_URL`: Address of Redis server (default: `localhost:6379`) - *Single Node Mode*.
-    - `REDIS_MODE`: `single` (default), `sentinel`, or `cluster`.
-    - `REDIS_MASTER_NAME`: Master set name (default: `mymaster`) - *Sentinel Mode*.
-    - `REDIS_SENTINEL_ADDRS`: Comma-separated list of Sentinel addresses (e.g., `host1:26379,host2:26379`) - *Sentinel Mode*.
-    - `REDIS_CLUSTER_ADDRS`: Comma-separated list of Cluster seed nodes (e.g., `node1:6379,node2:6379`) - *Cluster Mode*.
-  - **PostgreSQL Options:**
-    - `PG_URL`: PostgreSQL connection string (e.g., `postgres://user:pass@host:5432/dbname?sslmode=disable`).
-    - `PG_MODE`: `single` (default) or `cluster`.
+
+  | Variable | Values | Default | Description |
+  |----------|--------|---------|-------------|
+  | `PORT` | any port | `9001` | Service listen port |
+  | `STORAGE_MODE` | `redis`, `memory`, `postgres` | `redis` | Storage backend to use |
+
+  **Redis Options** (when `STORAGE_MODE=redis`):
+
+  | Variable | Values | Default | Description |
+  |----------|--------|---------|-------------|
+  | `REDIS_URL` | `host:port` | `localhost:6379` | Redis server address (Single mode) |
+  | `REDIS_MODE` | `single`, `sentinel`, `cluster` | `single` | Redis deployment topology |
+  | `REDIS_MASTER_NAME` | string | `mymaster` | Sentinel master set name (Sentinel mode) |
+  | `REDIS_SENTINEL_ADDRS` | `host1:port,host2:port,...` | — | Comma-separated Sentinel addresses |
+  | `REDIS_CLUSTER_ADDRS` | `host1:port,host2:port,...` | — | Comma-separated Cluster seed nodes |
+
+  **PostgreSQL Options** (when `STORAGE_MODE=postgres`):
+
+  | Variable | Values | Default | Description |
+  |----------|--------|---------|-------------|
+  | `PG_URL` | connection string | — | e.g. `postgres://user:pass@host:5432/db?sslmode=disable` |
+  | `PG_MODE` | `single`, `cluster` | `single` | PostgreSQL deployment topology |
 
 ### Redis Architecture Notes
 When choosing between **Redis Cluster** and **Redis Sentinel**:

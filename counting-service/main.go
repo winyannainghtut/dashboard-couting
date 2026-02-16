@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -89,7 +90,8 @@ func (m *InMemoryStore) GetInfo(ctx context.Context) (string, error) {
 
 // PostgresStore implements CounterStore using PostgreSQL.
 type PostgresStore struct {
-	db *sql.DB
+	db   *sql.DB
+	host string
 }
 
 func (p *PostgresStore) Incr(ctx context.Context) (int64, error) {
@@ -101,29 +103,26 @@ func (p *PostgresStore) Incr(ctx context.Context) (int64, error) {
 }
 
 func (p *PostgresStore) GetInfo(ctx context.Context) (string, error) {
-	var version string
-	err := p.db.QueryRowContext(ctx, "SELECT version()").Scan(&version)
-	if err != nil {
-		return "", err
-	}
-	// Truncate long version strings
-	if len(version) > 60 {
-		version = version[:60] + "..."
-	}
-	return version, nil
+	return p.host, nil
 }
 
-func getPostgresDB() *sql.DB {
+func getPostgresDB() (*sql.DB, string) {
 	pgURL := os.Getenv("PG_URL")
 	if pgURL == "" {
 		pgURL = "postgres://counting:counting@localhost:5432/counting?sslmode=disable"
+	}
+
+	// Extract host from URL for display
+	pgHost := pgURL
+	if u, err := url.Parse(pgURL); err == nil && u.Host != "" {
+		pgHost = u.Host
 	}
 
 	fmt.Printf("Connecting to PostgreSQL: %s\n", pgURL)
 	db, err := sql.Open("pgx", pgURL)
 	if err != nil {
 		log.Printf("Warning: Could not open PostgreSQL connection: %v", err)
-		return db
+		return db, pgHost
 	}
 
 	db.SetMaxOpenConns(10)
@@ -138,7 +137,7 @@ func getPostgresDB() *sql.DB {
 	} else {
 		fmt.Println("Connected to PostgreSQL")
 	}
-	return db
+	return db, pgHost
 }
 
 func getRedisClient() redis.UniversalClient {
@@ -241,15 +240,17 @@ func main() {
 	portWithColon := fmt.Sprintf(":%s", port)
 
 	var store CounterStore
-	storageMode := os.Getenv("STORAGE_MODE")
+	storageMode = os.Getenv("STORAGE_MODE")
 	switch storageMode {
 	case "memory":
 		fmt.Println("Starting in Standalone Mode (In-Memory)")
 		store = &InMemoryStore{}
 	case "postgres":
 		fmt.Println("Starting in PostgreSQL Mode")
-		store = &PostgresStore{db: getPostgresDB()}
+		db, pgHost := getPostgresDB()
+		store = &PostgresStore{db: db, host: pgHost}
 	default:
+		storageMode = "redis"
 		store = &RedisStore{client: getRedisClient()}
 	}
 
@@ -269,13 +270,18 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello, you've hit %s\n", r.URL.Path)
 }
 
+// storageMode tracks the active storage backend.
+var storageMode string
+
 // Count stores a number that is being counted and other data to
 // return as JSON in the API.
 type Count struct {
-	Count     int64  `json:"count"`
-	Hostname  string `json:"hostname"`
-	RedisHost string `json:"redis_host,omitempty"`
-	Message   string `json:"message,omitempty"`
+	Count       int64  `json:"count"`
+	Hostname    string `json:"hostname"`
+	StorageMode string `json:"storage_mode"`
+	RedisHost   string `json:"redis_host,omitempty"`
+	PgHost      string `json:"pg_host,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 // CountHandler serves a JSON feed that contains a number that increments each time
@@ -293,22 +299,30 @@ func (h CountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Graceful degradation
 		count := Count{
-			Count:    -1,
-			Hostname: hostname,
-			Message:  fmt.Sprintf("Store Error: %v", err),
+			Count:       -1,
+			Hostname:    hostname,
+			StorageMode: storageMode,
+			Message:     fmt.Sprintf("Store Error: %v", err),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(count)
 		return
 	}
 
-	// Get Store Info (Redis Run ID or Memory Info)
+	// Get Store Info (Redis Run ID or PostgreSQL version)
 	storeInfo, _ := h.store.GetInfo(ctx)
 
 	count := Count{
-		Count:     newCount,
-		Hostname:  hostname,
-		RedisHost: storeInfo,
+		Count:       newCount,
+		Hostname:    hostname,
+		StorageMode: storageMode,
+	}
+
+	switch storageMode {
+	case "postgres":
+		count.PgHost = storeInfo
+	default:
+		count.RedisHost = storeInfo
 	}
 
 	w.Header().Set("Content-Type", "application/json")
