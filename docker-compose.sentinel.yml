@@ -1,0 +1,89 @@
+services:
+  # Master Node
+  redis-master:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - demo-network
+
+  # Replica Nodes
+  redis-replica-1:
+    image: redis:alpine
+    command: redis-server --replicaof redis-master 6379
+    depends_on:
+      - redis-master
+    networks:
+      - demo-network
+
+  redis-replica-2:
+    image: redis:alpine
+    command: redis-server --replicaof redis-master 6379
+    depends_on:
+      - redis-master
+    networks:
+      - demo-network
+
+  # Sentinel Nodes
+  sentinel-1:
+    build: ./sentinel
+    environment:
+      - SENTINEL_DOWN_AFTER=5000
+      - SENTINEL_FAILOVER=10000
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    networks:
+      - demo-network
+
+  sentinel-2:
+    build: ./sentinel
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    networks:
+      - demo-network
+
+  sentinel-3:
+    build: ./sentinel
+    depends_on:
+      - redis-master
+      - redis-replica-1
+      - redis-replica-2
+    networks:
+      - demo-network
+
+  # Application Services
+  counting-service:
+    build: ./counting-service
+    ports:
+      - "9001:9001"
+    environment:
+      - PORT=9001
+      - REDIS_MODE=sentinel
+      - REDIS_MASTER_NAME=mymaster
+      - REDIS_SENTINEL_ADDRS=sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+    depends_on:
+      - sentinel-1
+      - sentinel-2
+      - sentinel-3
+    networks:
+      - demo-network
+
+  dashboard-service:
+    build: ./dashboard-service
+    ports:
+      - "8080:80"
+    environment:
+      - PORT=80
+      - COUNTING_SERVICE_URL=http://counting-service:9001
+    depends_on:
+      - counting-service
+    networks:
+      - demo-network
+
+networks:
+  demo-network:
+    driver: bridge

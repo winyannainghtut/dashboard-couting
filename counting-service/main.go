@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,7 +28,7 @@ type CounterStore interface {
 
 // RedisStore implements CounterStore using Redis.
 type RedisStore struct {
-	client *redis.Client
+	client redis.UniversalClient
 }
 
 func (r *RedisStore) Incr(ctx context.Context) (int64, error) {
@@ -34,10 +36,30 @@ func (r *RedisStore) Incr(ctx context.Context) (int64, error) {
 }
 
 func (r *RedisStore) GetInfo(ctx context.Context) (string, error) {
-	redisInfo, err := r.client.Info(ctx, "server").Result()
+	// UniversalClient doesn't have a direct Info method that returns a single string for "server".
+	// We need to cast it to a specific client type or use a more generic approach.
+	// For simplicity, we'll try to get info from the primary node if it's a failover/cluster client,
+	// or directly from the client if it's a single node.
+	// This might not be perfectly accurate for all UniversalClient implementations,
+	// but it's a reasonable attempt for common Redis setups.
+	var redisInfo string
+	var err error
+
+	switch c := r.client.(type) {
+	case *redis.Client:
+		redisInfo, err = c.Info(ctx, "server").Result()
+	case *redis.ClusterClient:
+		// ClusterClient.Info returns a string (potentially combined or from a random node).
+		// We'll just use it directly.
+		redisInfo, err = c.Info(ctx, "server").Result()
+	default:
+		return "Unknown (Unsupported Redis Client Type)", nil
+	}
+
 	if err != nil {
 		return "", err
 	}
+
 	lines := strings.Split(redisInfo, "\r\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "run_id:") {
@@ -65,6 +87,152 @@ func (m *InMemoryStore) GetInfo(ctx context.Context) (string, error) {
 	return fmt.Sprintf("In-Memory (Host: %s)", hostname), nil
 }
 
+// PostgresStore implements CounterStore using PostgreSQL.
+type PostgresStore struct {
+	db *sql.DB
+}
+
+func (p *PostgresStore) Incr(ctx context.Context) (int64, error) {
+	var count int64
+	err := p.db.QueryRowContext(ctx,
+		"UPDATE counters SET count = count + 1 WHERE id = 'default' RETURNING count",
+	).Scan(&count)
+	return count, err
+}
+
+func (p *PostgresStore) GetInfo(ctx context.Context) (string, error) {
+	var version string
+	err := p.db.QueryRowContext(ctx, "SELECT version()").Scan(&version)
+	if err != nil {
+		return "", err
+	}
+	// Truncate long version strings
+	if len(version) > 60 {
+		version = version[:60] + "..."
+	}
+	return version, nil
+}
+
+func getPostgresDB() *sql.DB {
+	pgURL := os.Getenv("PG_URL")
+	if pgURL == "" {
+		pgURL = "postgres://counting:counting@localhost:5432/counting?sslmode=disable"
+	}
+
+	fmt.Printf("Connecting to PostgreSQL: %s\n", pgURL)
+	db, err := sql.Open("pgx", pgURL)
+	if err != nil {
+		log.Printf("Warning: Could not open PostgreSQL connection: %v", err)
+		return db
+	}
+
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// Ping
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		log.Printf("Warning: Could not connect to PostgreSQL: %v", err)
+	} else {
+		fmt.Println("Connected to PostgreSQL")
+	}
+	return db
+}
+
+func getRedisClient() redis.UniversalClient {
+	mode := os.Getenv("REDIS_MODE")
+	if mode == "cluster" {
+		// Cluster Mode
+		clusterAddrsStr := os.Getenv("REDIS_CLUSTER_ADDRS")
+		var clusterAddrs []string
+		if clusterAddrsStr != "" {
+			clusterAddrs = strings.Split(clusterAddrsStr, ",")
+		} else {
+			// Fallback
+			clusterAddrs = []string{"localhost:6379"}
+		}
+
+		fmt.Printf("Connecting to Redis Cluster: Addrs=%v\n", clusterAddrs)
+		rdb := redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs:        clusterAddrs,
+			DialTimeout:  time.Second,
+			ReadTimeout:  time.Second,
+			WriteTimeout: time.Second,
+		})
+
+		// Ping
+		ctx := context.Background()
+		_, err := rdb.Ping(ctx).Result()
+		if err != nil {
+			log.Printf("Warning: Could not connect to Redis Cluster: %v", err)
+		} else {
+			fmt.Printf("Connected to Redis Cluster\n")
+		}
+		return rdb
+	} else if mode == "sentinel" {
+		// Sentinel Mode
+		masterName := os.Getenv("REDIS_MASTER_NAME")
+		if masterName == "" {
+			masterName = "mymaster" // Default
+		}
+
+		sentinelAddrsStr := os.Getenv("REDIS_SENTINEL_ADDRS")
+		var sentinelAddrs []string
+		if sentinelAddrsStr != "" {
+			sentinelAddrs = strings.Split(sentinelAddrsStr, ",")
+		} else {
+			// Fallback/Default for demo
+			sentinelAddrs = []string{"localhost:26379"}
+		}
+
+		fmt.Printf("Connecting to Redis Sentinel: Master=%s, Sentinels=%v\n", masterName, sentinelAddrs)
+		rdb := redis.NewFailoverClient(&redis.FailoverOptions{
+			MasterName:    masterName,
+			SentinelAddrs: sentinelAddrs,
+			DialTimeout:   time.Second,
+			ReadTimeout:   time.Second,
+			WriteTimeout:  time.Second,
+		})
+
+		// Ping
+		ctx := context.Background()
+		_, err := rdb.Ping(ctx).Result()
+		if err != nil {
+			log.Printf("Warning: Could not connect to Redis Sentinel: %v", err)
+		} else {
+			fmt.Printf("Connected to Redis Sentinel Master: %s\n", masterName)
+		}
+		return rdb
+
+	} else {
+		// Single Node Mode (Default)
+		redisURL := os.Getenv("REDIS_URL")
+		if redisURL == "" {
+			redisURL = "localhost:6379"
+		}
+
+		fmt.Printf("Connecting to Single Redis Node: %s\n", redisURL)
+		rdb := redis.NewClient(&redis.Options{
+			Addr:         redisURL,
+			DialTimeout:  time.Second,
+			ReadTimeout:  time.Second,
+			WriteTimeout: time.Second,
+		})
+
+		// Ping
+		ctx := context.Background()
+		_, err := rdb.Ping(ctx).Result()
+		if err != nil {
+			log.Printf("Warning: Could not connect to Redis at %s: %v", redisURL, err)
+		} else {
+			fmt.Printf("Connected to Redis at %s\n", redisURL)
+		}
+		return rdb
+	}
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -74,32 +242,15 @@ func main() {
 
 	var store CounterStore
 	storageMode := os.Getenv("STORAGE_MODE")
-	if storageMode == "memory" {
+	switch storageMode {
+	case "memory":
 		fmt.Println("Starting in Standalone Mode (In-Memory)")
 		store = &InMemoryStore{}
-	} else {
-		// Default to Redis
-		redisURL := os.Getenv("REDIS_URL")
-		if redisURL == "" {
-			redisURL = "localhost:6379"
-		}
-
-		rdb := redis.NewClient(&redis.Options{
-			Addr:         redisURL,
-			DialTimeout:  time.Second,
-			ReadTimeout:  time.Second,
-			WriteTimeout: time.Second,
-		})
-
-		// Ping Redis to ensure connection
-		ctx := context.Background()
-		_, err := rdb.Ping(ctx).Result()
-		if err != nil {
-			log.Printf("Warning: Could not connect to Redis at %s: %v", redisURL, err)
-		} else {
-			fmt.Printf("Connected to Redis at %s\n", redisURL)
-		}
-		store = &RedisStore{client: rdb}
+	case "postgres":
+		fmt.Println("Starting in PostgreSQL Mode")
+		store = &PostgresStore{db: getPostgresDB()}
+	default:
+		store = &RedisStore{client: getRedisClient()}
 	}
 
 	router := mux.NewRouter()

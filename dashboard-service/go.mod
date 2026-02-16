@@ -1,6 +1,6 @@
 module github.com/hashicorp/demo-consul-101/services/dashboard-service
 
-go 1.22
+go 1.21
 
 require github.com/gorilla/websocket v1.5.1
 

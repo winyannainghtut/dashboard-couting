@@ -193,13 +193,12 @@ func getAndParseCount() (Count, error) {
 	if getErr != nil {
 		return Count{}, getErr
 	}
+	defer res.Body.Close()
 
 	body, readErr := io.ReadAll(res.Body)
 	if readErr != nil {
 		return Count{}, readErr
 	}
-
-	defer res.Body.Close()
 	return parseCount(body)
 }
 

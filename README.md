@@ -8,6 +8,36 @@ This repository contains a demonstration of a microservices architecture using C
 A backend service written in Go regarding counting logic.
 - **Port**: 9001 (default)
 - **Path**: `/counting-service`
+- **Configuration**:
+  - `PORT`: Service port (default: 9001).
+  - `STORAGE_MODE`: `redis` (default), `memory`, or `postgres`.
+  - **Redis Options:**
+    - `REDIS_URL`: Address of Redis server (default: `localhost:6379`) - *Single Node Mode*.
+    - `REDIS_MODE`: `single` (default), `sentinel`, or `cluster`.
+    - `REDIS_MASTER_NAME`: Master set name (default: `mymaster`) - *Sentinel Mode*.
+    - `REDIS_SENTINEL_ADDRS`: Comma-separated list of Sentinel addresses (e.g., `host1:26379,host2:26379`) - *Sentinel Mode*.
+    - `REDIS_CLUSTER_ADDRS`: Comma-separated list of Cluster seed nodes (e.g., `node1:6379,node2:6379`) - *Cluster Mode*.
+  - **PostgreSQL Options:**
+    - `PG_URL`: PostgreSQL connection string (e.g., `postgres://user:pass@host:5432/dbname?sslmode=disable`).
+    - `PG_MODE`: `single` (default) or `cluster`.
+
+### Redis Architecture Notes
+When choosing between **Redis Cluster** and **Redis Sentinel**:
+- **Redis Sentinel**: Best for High Availability (HA) with smaller datasets.
+  - Recommended minimum: 1 Master + 1 Replica + 3 Sentinels (works with 2-3 nodes).
+  - Handles failover automatically if the master dies.
+- **Redis Cluster**: Best for large datasets that need sharding (Partitioning).
+  - **Required minimum**: 3 Master nodes (for consensus/quorum).
+  - **Recommended for HA**: 6 Nodes (3 Masters + 3 Replicas) to survive node failures without data loss.
+  - A 3-node cluster (Masters only) will **stop working** if a single node fails, because data is sharded and redundancy is lost.
+
+### PostgreSQL Architecture Notes
+The counting-service also supports PostgreSQL as a backend (`STORAGE_MODE=postgres`).
+- **Single Mode**: One PostgreSQL instance. Simple and reliable.
+  - Use `docker-compose.postgres.yml` to test.
+- **Cluster Mode** (`PG_MODE=cluster`): Uses Bitnami `postgresql-repmgr` (1 Primary + 2 Standbys) with `pgpool` for connection pooling and automatic failover.
+  - If the primary fails, `repmgr` promotes a standby, and `pgpool` routes connections transparently.
+  - Use `docker-compose.postgres-cluster.yml` to test.
 
 ### Dashboard Service
 A frontend service that displays the count from the counting service.

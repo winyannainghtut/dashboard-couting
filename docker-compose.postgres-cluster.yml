@@ -1,0 +1,107 @@
+services:
+  # PostgreSQL Primary
+  pg-primary:
+    image: bitnami/postgresql-repmgr:16
+    environment:
+      - POSTGRESQL_USERNAME=counting
+      - POSTGRESQL_PASSWORD=counting
+      - POSTGRESQL_DATABASE=counting
+      - REPMGR_USERNAME=repmgr
+      - REPMGR_PASSWORD=repmgrpass
+      - REPMGR_PRIMARY_HOST=pg-primary
+      - REPMGR_PARTNER_NODES=pg-primary,pg-standby-1,pg-standby-2
+      - REPMGR_NODE_NAME=pg-primary
+      - REPMGR_NODE_NETWORK_NAME=pg-primary
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - demo-network
+
+  # PostgreSQL Standby 1
+  pg-standby-1:
+    image: bitnami/postgresql-repmgr:16
+    environment:
+      - POSTGRESQL_USERNAME=counting
+      - POSTGRESQL_PASSWORD=counting
+      - POSTGRESQL_DATABASE=counting
+      - REPMGR_USERNAME=repmgr
+      - REPMGR_PASSWORD=repmgrpass
+      - REPMGR_PRIMARY_HOST=pg-primary
+      - REPMGR_PARTNER_NODES=pg-primary,pg-standby-1,pg-standby-2
+      - REPMGR_NODE_NAME=pg-standby-1
+      - REPMGR_NODE_NETWORK_NAME=pg-standby-1
+    depends_on:
+      - pg-primary
+    networks:
+      - demo-network
+
+  # PostgreSQL Standby 2
+  pg-standby-2:
+    image: bitnami/postgresql-repmgr:16
+    environment:
+      - POSTGRESQL_USERNAME=counting
+      - POSTGRESQL_PASSWORD=counting
+      - POSTGRESQL_DATABASE=counting
+      - REPMGR_USERNAME=repmgr
+      - REPMGR_PASSWORD=repmgrpass
+      - REPMGR_PRIMARY_HOST=pg-primary
+      - REPMGR_PARTNER_NODES=pg-primary,pg-standby-1,pg-standby-2
+      - REPMGR_NODE_NAME=pg-standby-2
+      - REPMGR_NODE_NETWORK_NAME=pg-standby-2
+    depends_on:
+      - pg-primary
+    networks:
+      - demo-network
+
+  # Pgpool-II for connection pooling and failover
+  pgpool:
+    image: bitnami/pgpool:4
+    environment:
+      - PGPOOL_BACKEND_NODES=0:pg-primary:5432,1:pg-standby-1:5432,2:pg-standby-2:5432
+      - PGPOOL_POSTGRES_USERNAME=counting
+      - PGPOOL_POSTGRES_PASSWORD=counting
+      - PGPOOL_ADMIN_USERNAME=admin
+      - PGPOOL_ADMIN_PASSWORD=adminpass
+      - PGPOOL_SR_CHECK_USER=repmgr
+      - PGPOOL_SR_CHECK_PASSWORD=repmgrpass
+      - PGPOOL_ENABLE_LOAD_BALANCING=yes
+      - PGPOOL_ENABLE_STATEMENT_LOAD_BALANCING=yes
+    ports:
+      - "5432:5432"
+    depends_on:
+      - pg-primary
+      - pg-standby-1
+      - pg-standby-2
+    networks:
+      - demo-network
+
+  # Application Services
+  counting-service:
+    build: ./counting-service
+    ports:
+      - "9001:9001"
+    environment:
+      - PORT=9001
+      - STORAGE_MODE=postgres
+      - PG_MODE=cluster
+      - PG_URL=postgres://counting:counting@pgpool:5432/counting?sslmode=disable
+    depends_on:
+      - pgpool
+    networks:
+      - demo-network
+
+  dashboard-service:
+    build: ./dashboard-service
+    ports:
+      - "8080:80"
+    environment:
+      - PORT=80
+      - COUNTING_SERVICE_URL=http://counting-service:9001
+    depends_on:
+      - counting-service
+    networks:
+      - demo-network
+
+networks:
+  demo-network:
+    driver: bridge

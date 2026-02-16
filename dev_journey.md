@@ -46,27 +46,53 @@
   - Updated `dashboard-service` to pass this ID to the frontend.
   - Added a new UI card in the Dashboard to display the Redis Run ID, allowing verification of which Redis instance is being used (useful for future replication/clustering work).
 
+### 6. Redis Sentinel & Cluster Support
+- **Problem**: Need to support various Redis deployment modes (Single, Sentinel, Cluster) for different scale/availability requirements.
+- **Action**:
+  - Refactored `counting-service` to use an interface `CounterStore` and support multiple backends (Memory, Redis).
+  - Implemented `getRedisClient` factory to handle:
+    - **Single Node**: Direct connection (`REDIS_URL`).
+    - **Sentinel**: HA with automatic failover (`REDIS_MODE=sentinel`, `REDIS_MASTER_NAME`, `REDIS_SENTINEL_ADDRS`).
+    - **Cluster**: Sharding for scale (`REDIS_MODE=cluster`, `REDIS_CLUSTER_ADDRS`).
+  - **Docker Compose**:
+    - Created `docker-compose.standalone.yml` for memory-only mode.
+    - Created `docker-compose.sentinel.yml` for a full local Sentinel stack (1 Master, 2 Replicas, 3 Sentinels).
+    - Created `docker-compose.cluster.yml` for a full local Cluster stack (6 Nodes + Creator).
+
+### 7. PostgreSQL Support
+- **Problem**: Need an alternative to Redis for teams that prefer relational databases or need ACID compliance.
+- **Action**:
+  - Added `PostgresStore` implementing `CounterStore` using `github.com/jackc/pgx/v5`.
+  - `Incr()` uses atomic `UPDATE counters SET count = count + 1 WHERE id = 'default' RETURNING count`.
+  - `GetInfo()` returns `SELECT version()` (PostgreSQL version string).
+  - Added env vars: `STORAGE_MODE=postgres`, `PG_URL`, `PG_MODE` (`single` or `cluster`).
+  - Created `postgres/init.sql` schema (auto-initialized `counters` table).
+  - **Docker Compose**:
+    - Created `docker-compose.postgres.yml` for single PostgreSQL (`postgres:16-alpine`).
+    - Created `docker-compose.postgres-cluster.yml` for HA cluster (Bitnami `postgresql-repmgr` with 1 Primary + 2 Standbys + `pgpool` for failover).
+  - **Verified**: Single PostgreSQL mode tested end-to-end — count increments correctly.
+
+### 8. Code Review & Fixes
+- **Fixes Applied**:
+  - Moved `res.Body.Close()` to correct position in `dashboard-service/main.go`.
+  - Aligned `go.mod` versions across services to match local toolchain (`go 1.21`).
+  - Added missing `build: ./dashboard-service` to `docker-compose.yml`.
+
 ## Current State
-- **Code**: Fully implemented locally.
-- **Git**: Changes for Redis integration are **staged locally but NOT pushed**.
-- **Build**: The `counting-service` build relies on `go mod tidy` running inside the container because local `go get` failed.
+- **Code**: Fully implemented with 4 storage backends: In-Memory, Redis (Single/Sentinel/Cluster), and PostgreSQL (Single/Cluster).
+- **Git**: All changes pushed to GitHub.
+- **Docker Compose files**: `docker-compose.yml` (default Redis), `docker-compose.standalone.yml` (memory), `docker-compose.sentinel.yml`, `docker-compose.cluster.yml`, `docker-compose.postgres.yml`, `docker-compose.postgres-cluster.yml`.
+- **Build**: Both services compile locally with Go 1.21 and in Docker via multi-stage builds.
 
 ## Where to Continue
 
-### 1. Verification
-- **Action**: Run `docker-compose up --build` locally.
-- **Expected Outcome**: 
-  - All 3 containers (dashboard, counting, redis) start.
-  - Dashboard shows the count.
-  - Restarting `counting-service` preserves the count (Redis persistence).
+### 1. Deployment / Push
+- **Action**: Push changes to GitHub.
+- **Consideration**: The CI/CD pipeline builds Go images using Docker. All dependencies are resolved inside the container.
 
-### 2. Deployment / Push
-- **Action**: Once verified, push the changes to GitHub.
-- **Consideration**: The CI/CD pipeline currently builds the Go images. The new `Dockerfile` logic (`go mod tidy`) should work in CI as well since it runs in a standard Docker build environment.
-
-### 3. Future Improvements
-- **Dashboard Optimization**: Currently, the Dashboard calls `counting-service` to get the count. For scale, the Dashboard could read directly from Redis (CQRS pattern) to reduce load on the Counting Service.
-- **Testing**: Add integration tests in the CI pipeline that spin up Redis and verify the API response.
+### 2. Future Improvements
+- **Dashboard Optimization**: Dashboard could read directly from the database (CQRS pattern) to reduce load on the Counting Service.
+- **Testing**: Add integration tests in the CI pipeline that spin up Redis/PostgreSQL and verify the API response.
 - **Configuration**: Move hardcoded ports and URLs to a central `.env` file for `docker-compose`.
 
 ## Testing Guide
@@ -77,10 +103,13 @@
 3. Start Redis: `docker start demo-consul-101-redis-counting-1`
 4. **Observe**: System recovers automatically.
 
-### 3. Counting Service Failure
+### 2. Counting Service Failure
 1. Stop Counting Service: `docker stop demo-consul-101-counting-service-1`
 2. **Observe**: Status changes to "Counting Service is Unreachable", but **Dashboard Hostname** remains visible.
+
+### 3. Data Persistence
 - **Ephemeral Mode** (Default): Data resets on restart. 
   - Implementation: `command: redis-server --save "" --appendonly no` in docker-compose.
 - **Persistent Mode**: Data survives restart.
   - Implementation: Remove the `command` override.
+- **PostgreSQL**: Data persists by default (uses a table). Reset by dropping the volume.

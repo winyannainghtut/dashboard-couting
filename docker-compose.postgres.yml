@@ -1,29 +1,31 @@
 services:
-  redis-counting:
-    build: ./redis-counting
-    restart: always
-    # Disable persistence (RDB and AOF)
-    command: redis-server --save "" --appendonly no
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=counting
+      - POSTGRES_PASSWORD=counting
+      - POSTGRES_DB=counting
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "6379:6379"
+      - "5432:5432"
     networks:
       - demo-network
 
   counting-service:
-    image: winyannainghtut/counting-service:latest
     build: ./counting-service
     ports:
       - "9001:9001"
     environment:
       - PORT=9001
-      - REDIS_URL=redis-counting:6379
+      - STORAGE_MODE=postgres
+      - PG_URL=postgres://counting:counting@postgres:5432/counting?sslmode=disable
     depends_on:
-      - redis-counting
+      - postgres
     networks:
       - demo-network
 
   dashboard-service:
-    image: winyannainghtut/dashboard-service:latest
     build: ./dashboard-service
     ports:
       - "8080:80"

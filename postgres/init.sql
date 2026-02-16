@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS counters (
+    id VARCHAR(50) PRIMARY KEY DEFAULT 'default',
+    count BIGINT NOT NULL DEFAULT 0
+);
+
+INSERT INTO counters (id, count) VALUES ('default', 0) ON CONFLICT DO NOTHING;
