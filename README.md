@@ -14,6 +14,30 @@ A frontend service that displays the count from the counting service.
 - **Port**: 80 (default)
 - **Path**: `/dashboard-service`
 
+### Redis Service
+A Redis instance that stores the count state for High Availability.
+- **Port**: 6379
+
+## Architecture
+
+The system uses a Service-to-Service pattern where the Dashboard Service communicates with the Counting Service, which in turn persists data to Redis.
+
+```mermaid
+graph TD
+    User((User))
+    
+    subgraph "Docker Network"
+        DS[Dashboard Service]
+        CS[Counting Service]
+        Redis[(Redis)]
+        
+        DS -- HTTP GET --> CS
+        CS -- INCR --> Redis
+    end
+    
+    User -- Browser --> DS
+```
+
 ## Local Development
 
 ### Prerequisites
@@ -69,8 +93,8 @@ Alternatively, you can run both services together using Docker Compose.
 docker pull winyannainghtut/counting-service:latest
 docker pull winyannainghtut/dashboard-service:latest
 
-# Run the services
-docker-compose up
+# Run the services (and build local changes)
+docker-compose up --build
 ```
 
 ## CI/CD Pipeline
