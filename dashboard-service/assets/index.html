@@ -23,6 +23,8 @@
       <div id="connection-status" class="status-badge">Connecting...</div>
     </header>
 
+    <div id="error-banner" class="error-banner"></div>
+
     <main class="dashboard-grid">
       <!-- Main Count Card -->
       <div class="card count-card">
@@ -41,6 +43,12 @@
         <h3>Dashboard Service</h3>
         <div class="host-id" id="dashboard-hostname">Waiting...</div>
         <div class="host-label">Frontend Hostname</div>
+      </div>
+
+      <div class="card host-card">
+        <h3>Redis Service</h3>
+        <div class="host-id" id="redis-hostname">Waiting...</div>
+        <div class="host-label">Redis Run ID</div>
       </div>
     </main>
 

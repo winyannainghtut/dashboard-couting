@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
@@ -61,8 +62,10 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 // Count stores a number that is being counted and other data to
 // return as JSON in the API.
 type Count struct {
-	Count    int64  `json:"count"`
-	Hostname string `json:"hostname"`
+	Count     int64  `json:"count"`
+	Hostname  string `json:"hostname"`
+	RedisHost string `json:"redis_host,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 // CountHandler serves a JSON feed that contains a number that increments each time
@@ -73,17 +76,42 @@ type CountHandler struct {
 
 func (h CountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
+	hostname, _ := os.Hostname()
 
 	// Increment the count in Redis
 	newCount, err := h.client.Incr(ctx, "count").Result()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Redis Error: %v", err), http.StatusInternalServerError)
+		// Graceful degradation
+		count := Count{
+			Count:    -1,
+			Hostname: hostname,
+			Message:  fmt.Sprintf("Redis Error: %v", err),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(count)
 		return
 	}
 
-	hostname, _ := os.Hostname()
-	count := Count{Count: newCount, Hostname: hostname}
+	// Try to get Redis Run ID (Unique ID of the Redis instance)
+	// We use "INFO SERVER" command and look for "run_id"
+	redisInfo, err := h.client.Info(ctx, "server").Result()
+	redisRunID := "Unknown"
+	if err == nil {
+		lines := strings.Split(redisInfo, "\r\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "run_id:") {
+				redisRunID = strings.TrimPrefix(line, "run_id:")
+				break
+			}
+		}
+	}
 
-	responseJSON, _ := json.Marshal(count)
-	fmt.Fprintf(w, string(responseJSON))
+	count := Count{
+		Count:     newCount,
+		Hostname:  hostname,
+		RedisHost: redisRunID,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(count)
 }

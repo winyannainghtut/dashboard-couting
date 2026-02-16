@@ -52,10 +52,36 @@ function requestCount() {
 
 function showCount(message) {
   var formattedCount = Number(message.count).toLocaleString();
-  document.getElementById("count").textContent = formattedCount;
+  var countEl = document.getElementById("count");
+  var bannerEl = document.getElementById("error-banner");
+
+  // Handle Error Message
+  if (message.message) {
+    bannerEl.textContent = message.message;
+    bannerEl.style.display = "block";
+
+    // Optional: make the count look like an error or placeholder
+    if (message.count === -1) {
+      countEl.textContent = "!";
+      countEl.style.color = "var(--status-disconnected)";
+    } else {
+      countEl.textContent = formattedCount;
+      countEl.style.color = ""; // reset
+    }
+  } else {
+    bannerEl.style.display = "none";
+    countEl.textContent = formattedCount;
+    countEl.style.color = ""; // reset
+  }
+
   document.getElementById("hostname").textContent = message.hostname;
   document.getElementById("dashboard-hostname").textContent =
     message.dashboard_hostname;
+
+  var redisHostEl = document.getElementById("redis-hostname");
+  if (redisHostEl) {
+    redisHostEl.textContent = message.redis_host || "Unknown";
+  }
 }
 
 function disconnected() {

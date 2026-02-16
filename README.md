@@ -15,12 +15,17 @@ A frontend service that displays the count from the counting service.
 - **Path**: `/dashboard-service`
 
 ### Redis Service
-A Redis instance that stores the count state for High Availability.
+A Redis instance that stores the count state.
 - **Port**: 6379
+- **Persistence**: Disabled (count resets on restart) for demo purposes.
 
 ## Architecture
 
 The system uses a Service-to-Service pattern where the Dashboard Service communicates with the Counting Service, which in turn persists data to Redis.
+
+**Features:**
+- **Graceful Degradation**: If Redis is unavailable, the Counting Service returns a fallback response, and the Dashboard displays a visual error banner.
+- **Observability**: The Dashboard displays the hostname of the backend container and the unique Run ID of the Redis instance.
 
 ```mermaid
 graph TD
@@ -96,6 +101,52 @@ docker pull winyannainghtut/dashboard-service:latest
 # Run the services (and build local changes)
 docker-compose up --build
 ```
+
+## Testing Scenarios
+
+You can verify the system's robustness by forcing failures:
+
+### 1. Redis Failure (Graceful Degradation)
+**Scenario**: Stop Redis but keep other services running.
+```bash
+docker stop demo-consul-101-redis-counting-1
+```
+**Expected Result**:
+- Dashboard: Shows a red error banner (e.g., "Redis Error: ...").
+- Count: Shows "!" or error state.
+- **Critical**: The "Counting Service" hostname card **still displays a valid ID**. This proves the backend service is alive and handling the error gracefully.
+- Redis Run ID: Shows "Unknown".
+
+**Resume**:
+```bash
+docker start demo-consul-101-redis-counting-1
+```
+**Expected Result**: Application recovers automatically. Error banner disappears, and count resumes.
+
+### 2. Counting Service Failure
+**Scenario**: Stop the backend service.
+```bash
+docker stop demo-consul-101-counting-service-1
+```
+**Expected Result**:
+- Dashboard: Shows "Counting Service is Unreachable" in the status badge.
+- **Resilience**: The **Dashboard Hostname** card remains visible and valid, proving the frontend service is functioning.
+- Count/Backend Info: Shows error or "Waiting...".
+
+### 3. Data Persistence Test
+**Scenario**: Verify if data survives a restart.
+1. Increment the count a few times.
+2. Restart the stack: `docker-compose restart`
+3. Check if count continues or resets to 1.
+
+**Configuration**:
+- **Ephemeral (Current Default)**: Count **resets to 1**.
+  configured in `docker-compose.yml`:
+  ```yaml
+  command: redis-server --save "" --appendonly no
+  ```
+- **Persistent**: Count **continues**.
+  To enable, remove the `command` line in `docker-compose.yml` and restart (`docker-compose up --build --force-recreate`).
 
 ## CI/CD Pipeline
 

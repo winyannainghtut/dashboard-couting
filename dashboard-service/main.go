@@ -166,6 +166,7 @@ type Count struct {
 	Count             int    `json:"count"`
 	Message           string `json:"message"`
 	Hostname          string `json:"hostname"`
+	RedisHost         string `json:"redis_host"`
 	DashboardHostname string `json:"dashboard_hostname"`
 }
 

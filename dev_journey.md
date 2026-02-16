@@ -35,6 +35,16 @@
   - **Orchestration**: Updated `docker-compose.yml` to include `redis-counting` service and link it to `counting-service` via `REDIS_URL`.
   - **Documentation**: Updated root `README.md` with new architecture diagram and instructions.
 
+### 5. Robustness & Observability
+- **Redis Persistence**: Disabled persistence in `docker-compose.yml` (command `redis-server --save "" --appendonly no`) to demonstrate ephemeral behavior or simply reset state easily.
+- **Graceful Degradation**: 
+  - Updated `counting-service` to catch Redis errors. Instead of 500ing, it returns a JSON object with `count: -1` and the error message.
+  - Updated `dashboard-service` (frontend) to detect this error state and show a red error banner instead of crashing or showing nothing.
+- **Redis Identification**:
+  - Updated `counting-service` to fetch the Redis `run_id` via the `INFO SERVER` command.
+  - Updated `dashboard-service` to pass this ID to the frontend.
+  - Added a new UI card in the Dashboard to display the Redis Run ID, allowing verification of which Redis instance is being used (useful for future replication/clustering work).
+
 ## Current State
 - **Code**: Fully implemented locally.
 - **Git**: Changes for Redis integration are **staged locally but NOT pushed**.
@@ -57,3 +67,19 @@
 - **Dashboard Optimization**: Currently, the Dashboard calls `counting-service` to get the count. For scale, the Dashboard could read directly from Redis (CQRS pattern) to reduce load on the Counting Service.
 - **Testing**: Add integration tests in the CI pipeline that spin up Redis and verify the API response.
 - **Configuration**: Move hardcoded ports and URLs to a central `.env` file for `docker-compose`.
+
+## Testing Guide
+
+### 1. Robustness Test (Redis Down)
+1. Stop Redis: `docker stop demo-consul-101-redis-counting-1`
+2. **Observe**: Dashboard shows error banner, but **BackEnd Hostname** is still visible.
+3. Start Redis: `docker start demo-consul-101-redis-counting-1`
+4. **Observe**: System recovers automatically.
+
+### 3. Counting Service Failure
+1. Stop Counting Service: `docker stop demo-consul-101-counting-service-1`
+2. **Observe**: Status changes to "Counting Service is Unreachable", but **Dashboard Hostname** remains visible.
+- **Ephemeral Mode** (Default): Data resets on restart. 
+  - Implementation: `command: redis-server --save "" --appendonly no` in docker-compose.
+- **Persistent Mode**: Data survives restart.
+  - Implementation: Remove the `command` override.
