@@ -68,9 +68,9 @@
   - Added env vars: `STORAGE_MODE=postgres`, `PG_URL`, `PG_MODE` (`single` or `cluster`).
   - Created `postgres/init.sql` schema (auto-initialized `counters` table).
   - **Docker Compose**:
-    - Created `docker-compose.postgres.yml` for single PostgreSQL (`postgres:16-alpine`).
-    - Created `docker-compose.postgres-cluster.yml` for HA cluster (Bitnami `postgresql-repmgr` with 1 Primary + 2 Standbys + `pgpool` for failover).
-  - **Verified**: Single PostgreSQL mode tested end-to-end — count increments correctly.
+    - Created `docker-compose.postgres.yml` for single PostgreSQL (`bitnami/postgresql:latest`).
+    - Created `docker-compose.postgres-cluster.yml` for HA cluster (`bitnami/postgresql:latest` with streaming replication — 1 Master + 2 Slaves).
+  - **Verified**: Both single and cluster PostgreSQL modes tested end-to-end — count increments correctly, slave WAL streaming confirmed.
 
 ### 8. Code Review & Fixes
 - **Fixes Applied**:

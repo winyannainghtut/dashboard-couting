@@ -1,10 +1,10 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: bitnami/postgresql:latest
     environment:
-      - POSTGRES_USER=counting
-      - POSTGRES_PASSWORD=counting
-      - POSTGRES_DB=counting
+      - POSTGRESQL_USERNAME=counting
+      - POSTGRESQL_PASSWORD=counting
+      - POSTGRESQL_DATABASE=counting
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:

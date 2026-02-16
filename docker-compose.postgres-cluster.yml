@@ -1,77 +1,53 @@
 services:
-  # PostgreSQL Primary
-  pg-primary:
-    image: bitnami/postgresql-repmgr:16
+  # PostgreSQL Master
+  pg-master:
+    image: bitnami/postgresql:latest
+    ports:
+      - "5432:5432"
     environment:
+      - POSTGRESQL_REPLICATION_MODE=master
       - POSTGRESQL_USERNAME=counting
       - POSTGRESQL_PASSWORD=counting
       - POSTGRESQL_DATABASE=counting
-      - REPMGR_USERNAME=repmgr
-      - REPMGR_PASSWORD=repmgrpass
-      - REPMGR_PRIMARY_HOST=pg-primary
-      - REPMGR_PARTNER_NODES=pg-primary,pg-standby-1,pg-standby-2
-      - REPMGR_NODE_NAME=pg-primary
-      - REPMGR_NODE_NETWORK_NAME=pg-primary
+      - POSTGRESQL_REPLICATION_USER=repl_user
+      - POSTGRESQL_REPLICATION_PASSWORD=repl_password
     volumes:
+      - pg_master_data:/bitnami/postgresql
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - demo-network
 
-  # PostgreSQL Standby 1
-  pg-standby-1:
-    image: bitnami/postgresql-repmgr:16
-    environment:
-      - POSTGRESQL_USERNAME=counting
-      - POSTGRESQL_PASSWORD=counting
-      - POSTGRESQL_DATABASE=counting
-      - REPMGR_USERNAME=repmgr
-      - REPMGR_PASSWORD=repmgrpass
-      - REPMGR_PRIMARY_HOST=pg-primary
-      - REPMGR_PARTNER_NODES=pg-primary,pg-standby-1,pg-standby-2
-      - REPMGR_NODE_NAME=pg-standby-1
-      - REPMGR_NODE_NETWORK_NAME=pg-standby-1
-    depends_on:
-      - pg-primary
-    networks:
-      - demo-network
-
-  # PostgreSQL Standby 2
-  pg-standby-2:
-    image: bitnami/postgresql-repmgr:16
-    environment:
-      - POSTGRESQL_USERNAME=counting
-      - POSTGRESQL_PASSWORD=counting
-      - POSTGRESQL_DATABASE=counting
-      - REPMGR_USERNAME=repmgr
-      - REPMGR_PASSWORD=repmgrpass
-      - REPMGR_PRIMARY_HOST=pg-primary
-      - REPMGR_PARTNER_NODES=pg-primary,pg-standby-1,pg-standby-2
-      - REPMGR_NODE_NAME=pg-standby-2
-      - REPMGR_NODE_NETWORK_NAME=pg-standby-2
-    depends_on:
-      - pg-primary
-    networks:
-      - demo-network
-
-  # Pgpool-II for connection pooling and failover
-  pgpool:
-    image: bitnami/pgpool:4
-    environment:
-      - PGPOOL_BACKEND_NODES=0:pg-primary:5432,1:pg-standby-1:5432,2:pg-standby-2:5432
-      - PGPOOL_POSTGRES_USERNAME=counting
-      - PGPOOL_POSTGRES_PASSWORD=counting
-      - PGPOOL_ADMIN_USERNAME=admin
-      - PGPOOL_ADMIN_PASSWORD=adminpass
-      - PGPOOL_SR_CHECK_USER=repmgr
-      - PGPOOL_SR_CHECK_PASSWORD=repmgrpass
-      - PGPOOL_ENABLE_LOAD_BALANCING=yes
-      - PGPOOL_ENABLE_STATEMENT_LOAD_BALANCING=yes
+  # PostgreSQL Slave 1
+  pg-slave-1:
+    image: bitnami/postgresql:latest
     ports:
-      - "5432:5432"
+      - "5433:5432"
     depends_on:
-      - pg-primary
-      - pg-standby-1
-      - pg-standby-2
+      - pg-master
+    environment:
+      - POSTGRESQL_REPLICATION_MODE=slave
+      - POSTGRESQL_MASTER_HOST=pg-master
+      - POSTGRESQL_MASTER_PORT_NUMBER=5432
+      - POSTGRESQL_REPLICATION_USER=repl_user
+      - POSTGRESQL_REPLICATION_PASSWORD=repl_password
+      - POSTGRESQL_PASSWORD=counting
+    networks:
+      - demo-network
+
+  # PostgreSQL Slave 2
+  pg-slave-2:
+    image: bitnami/postgresql:latest
+    ports:
+      - "5434:5432"
+    depends_on:
+      - pg-master
+    environment:
+      - POSTGRESQL_REPLICATION_MODE=slave
+      - POSTGRESQL_MASTER_HOST=pg-master
+      - POSTGRESQL_MASTER_PORT_NUMBER=5432
+      - POSTGRESQL_REPLICATION_USER=repl_user
+      - POSTGRESQL_REPLICATION_PASSWORD=repl_password
+      - POSTGRESQL_PASSWORD=counting
     networks:
       - demo-network
 
@@ -84,9 +60,9 @@ services:
       - PORT=9001
       - STORAGE_MODE=postgres
       - PG_MODE=cluster
-      - PG_URL=postgres://counting:counting@pgpool:5432/counting?sslmode=disable
+      - PG_URL=postgres://counting:counting@pg-master:5432/counting?sslmode=disable
     depends_on:
-      - pgpool
+      - pg-master
     networks:
       - demo-network
 
@@ -101,6 +77,10 @@ services:
       - counting-service
     networks:
       - demo-network
+
+volumes:
+  pg_master_data:
+
 
 networks:
   demo-network:

@@ -33,10 +33,11 @@ When choosing between **Redis Cluster** and **Redis Sentinel**:
 
 ### PostgreSQL Architecture Notes
 The counting-service also supports PostgreSQL as a backend (`STORAGE_MODE=postgres`).
-- **Single Mode**: One PostgreSQL instance. Simple and reliable.
+- **Single Mode**: One `bitnami/postgresql` instance. Simple and reliable.
   - Use `docker-compose.postgres.yml` to test.
-- **Cluster Mode** (`PG_MODE=cluster`): Uses Bitnami `postgresql-repmgr` (1 Primary + 2 Standbys) with `pgpool` for connection pooling and automatic failover.
-  - If the primary fails, `repmgr` promotes a standby, and `pgpool` routes connections transparently.
+- **Cluster Mode** (`PG_MODE=cluster`): Uses `bitnami/postgresql` streaming replication (1 Master + 2 Slaves).
+  - Slaves stream WAL from the master for real-time read replicas.
+  - If the master fails, a slave can be promoted via trigger file (`/tmp/postgresql.trigger.5432`).
   - Use `docker-compose.postgres-cluster.yml` to test.
 
 ### Dashboard Service
