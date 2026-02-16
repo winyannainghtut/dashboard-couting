@@ -51,9 +51,19 @@ docker build -t dashboard-service ./dashboard-service
 
 ### Running Containers
 
+You can run the containers individually using `docker run`:
+
 ```bash
-docker run -p 9001:9001 counting-service
-docker run -p 8080:80 dashboard-service
+docker run -p 9001:9001 winyannainghtut/counting-service:latest
+docker run -p 8080:80 winyannainghtut/dashboard-service:latest
+```
+
+### Docker Compose
+
+Alternatively, you can run both services together using Docker Compose (assuming you have pulled the images):
+
+```bash
+docker-compose up
 ```
 
 ## CI/CD Pipeline
