@@ -40,6 +40,7 @@
 - **Graceful Degradation**: 
   - Updated `counting-service` to catch Redis errors. Instead of 500ing, it returns a JSON object with `count: -1` and the error message.
   - Updated `dashboard-service` (frontend) to detect this error state and show a red error banner instead of crashing or showing nothing.
+  - **Timeout Optimization**: Reduced Redis driver timeouts in `counting-service` to 1 second. This ensures the backend fails fast when Redis is down, allowing the Dashboard (which has a 2s timeout) to receive the graceful error response instead of timing out itself.
 - **Redis Identification**:
   - Updated `counting-service` to fetch the Redis `run_id` via the `INFO SERVER` command.
   - Updated `dashboard-service` to pass this ID to the frontend.
