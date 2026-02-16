@@ -64,6 +64,21 @@ To run the services locally:
     go run main.go
     ```
 
+### Standalone Mode (No Redis)
+You can run the `counting-service` in standalone mode, where it uses an in-memory counter instead of Redis. This is useful for development or simple deployments where persistence is not required.
+
+To enable standalone mode, set the `STORAGE_MODE` environment variable to `memory`.
+
+**PowerShell:**
+```powershell
+$env:PORT="9001"; $env:STORAGE_MODE="memory"; go run main.go
+```
+
+**Bash:**
+```bash
+PORT=9001 STORAGE_MODE=memory go run main.go
+```
+
 ## Docker
 
 You can build and run the services using Docker. Each service has its own `Dockerfile`.

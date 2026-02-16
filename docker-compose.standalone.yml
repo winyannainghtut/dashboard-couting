@@ -1,0 +1,28 @@
+services:
+  counting-service:
+    image: winyannainghtut/counting-service:latest
+    build: ./counting-service
+    ports:
+      - "9001:9001"
+    environment:
+      - PORT=9001
+      - STORAGE_MODE=memory
+    networks:
+      - demo-network
+
+  dashboard-service:
+    image: winyannainghtut/dashboard-service:latest
+    build: ./dashboard-service
+    ports:
+      - "8080:80"
+    environment:
+      - PORT=80
+      - COUNTING_SERVICE_URL=http://counting-service:9001
+    depends_on:
+      - counting-service
+    networks:
+      - demo-network
+
+networks:
+  demo-network:
+    driver: bridge
