@@ -60,9 +60,16 @@ docker run -p 8080:80 winyannainghtut/dashboard-service:latest
 
 ### Docker Compose
 
-Alternatively, you can run both services together using Docker Compose (assuming you have pulled the images):
+Alternatively, you can run both services together using Docker Compose.
+
+**Note:** You must pull the Docker images locally before running the services.
 
 ```bash
+# Pull the images
+docker pull winyannainghtut/counting-service:latest
+docker pull winyannainghtut/dashboard-service:latest
+
+# Run the services
 docker-compose up
 ```
 
