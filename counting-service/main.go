@@ -25,6 +25,7 @@ const defaultDBRequestTimeout = 1 * time.Second
 const defaultDNSNetwork = "udp"
 const defaultDNSPort = "53"
 const defaultDNSTimeout = 1500 * time.Millisecond
+const dbReconnectRetryTimeout = 2 * time.Second
 
 // CounterStore describes storage operations for the counter.
 type CounterStore interface {
@@ -53,19 +54,75 @@ func (m *InMemoryStore) GetDBNode(ctx context.Context) (string, error) {
 
 // CockroachStore uses CockroachDB for persistence.
 type CockroachStore struct {
-	db *sql.DB
+	mu          sync.RWMutex
+	reconnectMu sync.Mutex
+	db          *sql.DB
+	pgURL       string
 }
 
 func NewCockroachStore(pgURL string) (*CockroachStore, error) {
+	db, err := openCockroachDB(pgURL)
+	if err != nil {
+		return nil, err
+	}
+	return &CockroachStore{
+		db:    db,
+		pgURL: pgURL,
+	}, nil
+}
+
+func openCockroachDB(pgURL string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", pgURL)
 	if err != nil {
 		return nil, err
 	}
-	return &CockroachStore{db: db}, nil
+
+	// Keep connections fresh so clients can move away from dead DB nodes.
+	db.SetConnMaxLifetime(30 * time.Second)
+	db.SetConnMaxIdleTime(10 * time.Second)
+	db.SetMaxIdleConns(2)
+	db.SetMaxOpenConns(8)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	return db, nil
 }
 
-func (c *CockroachStore) ensureSchema(ctx context.Context) error {
-	_, err := c.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS counts (
+func (c *CockroachStore) currentDB() *sql.DB {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.db
+}
+
+func (c *CockroachStore) reconnect() error {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+
+	newDB, err := openCockroachDB(c.pgURL)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	oldDB := c.db
+	c.db = newDB
+	c.mu.Unlock()
+
+	if oldDB != nil {
+		_ = oldDB.Close()
+	}
+
+	return nil
+}
+
+func (c *CockroachStore) ensureSchema(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS counts (
 		id INT PRIMARY KEY,
 		count BIGINT NOT NULL
 	)`)
@@ -73,27 +130,54 @@ func (c *CockroachStore) ensureSchema(ctx context.Context) error {
 		return err
 	}
 
-	_, err = c.db.ExecContext(ctx, `INSERT INTO counts (id, count) VALUES (1, 0)
+	_, err = db.ExecContext(ctx, `INSERT INTO counts (id, count) VALUES (1, 0)
 		ON CONFLICT (id) DO NOTHING`)
 	return err
 }
 
-func (c *CockroachStore) Incr(ctx context.Context) (int64, error) {
-	if err := c.ensureSchema(ctx); err != nil {
+func (c *CockroachStore) incrOnce(ctx context.Context) (int64, error) {
+	db := c.currentDB()
+	if db == nil {
+		return 0, fmt.Errorf("database handle is nil")
+	}
+
+	if err := c.ensureSchema(ctx, db); err != nil {
 		return 0, err
 	}
 
 	var count int64
-	err := c.db.QueryRowContext(ctx, `UPDATE counts SET count = count + 1 WHERE id = 1 RETURNING count`).Scan(&count)
+	err := db.QueryRowContext(ctx, `UPDATE counts SET count = count + 1 WHERE id = 1 RETURNING count`).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
+func (c *CockroachStore) Incr(ctx context.Context) (int64, error) {
+	count, err := c.incrOnce(ctx)
+	if err == nil {
+		return count, err
+	}
+
+	// Retry once with a fresh pool so a dead node does not pin this service.
+	if reconnectErr := c.reconnect(); reconnectErr != nil {
+		return 0, fmt.Errorf("%w (reconnect failed: %v)", err, reconnectErr)
+	}
+
+	retryCtx, cancel := context.WithTimeout(context.Background(), dbReconnectRetryTimeout)
+	defer cancel()
+
+	return c.incrOnce(retryCtx)
+}
+
 func (c *CockroachStore) GetDBNode(ctx context.Context) (string, error) {
+	db := c.currentDB()
+	if db == nil {
+		return "", fmt.Errorf("database handle is nil")
+	}
+
 	var nodeID int64
-	err := c.db.QueryRowContext(ctx, `SELECT crdb_internal.node_id()`).Scan(&nodeID)
+	err := db.QueryRowContext(ctx, `SELECT crdb_internal.node_id()`).Scan(&nodeID)
 	if err != nil {
 		return "", err
 	}

@@ -28,23 +28,68 @@ services:
 
   roach1:
     image: cockroachdb/cockroach:latest
-    command: start-single-node --insecure --accept-sql-without-tls --listen-addr=localhost:26257 --sql-addr=0.0.0.0:26258 --http-addr=0.0.0.0:8080
+    hostname: roach1
+    command: start --insecure --listen-addr=0.0.0.0:26257 --advertise-addr=roach1:26257 --http-addr=0.0.0.0:8080 --join=roach1:26257,roach2:26257,roach3:26257
     ports:
-      - "26267:26258"
+      - "26267:26257"
       - "18081:8080"
     volumes:
       - roach1-failover-db-data:/cockroach/cockroach-data
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - /cockroach/cockroach sql --insecure --host=localhost:26258 -e "SELECT 1" >/dev/null 2>&1
-      interval: 3s
-      timeout: 2s
-      retries: 20
-      start_period: 5s
     networks:
       failover-db-network:
         ipv4_address: 172.26.0.6
+        aliases:
+          - roachdb
+
+  roach2:
+    image: cockroachdb/cockroach:latest
+    hostname: roach2
+    command: start --insecure --listen-addr=0.0.0.0:26257 --advertise-addr=roach2:26257 --http-addr=0.0.0.0:8080 --join=roach1:26257,roach2:26257,roach3:26257
+    ports:
+      - "26268:26257"
+      - "18082:8080"
+    volumes:
+      - roach2-failover-db-data:/cockroach/cockroach-data
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.7
+        aliases:
+          - roachdb
+
+  roach3:
+    image: cockroachdb/cockroach:latest
+    hostname: roach3
+    command: start --insecure --listen-addr=0.0.0.0:26257 --advertise-addr=roach3:26257 --http-addr=0.0.0.0:8080 --join=roach1:26257,roach2:26257,roach3:26257
+    ports:
+      - "26269:26257"
+      - "18083:8080"
+    volumes:
+      - roach3-failover-db-data:/cockroach/cockroach-data
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.8
+        aliases:
+          - roachdb
+
+  cluster-init:
+    image: cockroachdb/cockroach:latest
+    entrypoint:
+      - /bin/sh
+      - -ec
+    depends_on:
+      - roach1
+      - roach2
+      - roach3
+    command:
+      - |
+        until /cockroach/cockroach sql --insecure --host=roach1:26257 -e 'SELECT 1' >/dev/null 2>&1; do
+          /cockroach/cockroach init --insecure --host=roach1:26257 >/dev/null 2>&1 || true
+          sleep 2
+        done
+    restart: "no"
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.9
 
   counting-service-1:
     image: winyannainghtut/counting-service:latest
@@ -54,13 +99,13 @@ services:
     environment:
       - PORT=9001
       - STORAGE_MODE=cockroach
-      - PG_URL=postgresql://root@roach1:26258/defaultdb?sslmode=disable&connect_timeout=1
+      - PG_URL=postgresql://root@roachdb:26257/defaultdb?sslmode=disable&connect_timeout=1
       - DB_REQUEST_TIMEOUT_MS=4000
     depends_on:
       consul:
         condition: service_started
-      roach1:
-        condition: service_healthy
+      cluster-init:
+        condition: service_completed_successfully
     networks:
       failover-db-network:
         ipv4_address: 172.26.0.3
@@ -73,13 +118,13 @@ services:
     environment:
       - PORT=9001
       - STORAGE_MODE=cockroach
-      - PG_URL=postgresql://root@roach1:26258/defaultdb?sslmode=disable&connect_timeout=1
+      - PG_URL=postgresql://root@roachdb:26257/defaultdb?sslmode=disable&connect_timeout=1
       - DB_REQUEST_TIMEOUT_MS=4000
     depends_on:
       consul:
         condition: service_started
-      roach1:
-        condition: service_healthy
+      cluster-init:
+        condition: service_completed_successfully
     networks:
       failover-db-network:
         ipv4_address: 172.26.0.5
@@ -111,3 +156,5 @@ networks:
 volumes:
   consul-failover-db-data:
   roach1-failover-db-data:
+  roach2-failover-db-data:
+  roach3-failover-db-data:
