@@ -166,9 +166,6 @@ type Count struct {
 	Count             int    `json:"count"`
 	Message           string `json:"message"`
 	Hostname          string `json:"hostname"`
-	StorageMode       string `json:"storage_mode"`
-	RedisHost         string `json:"redis_host"`
-	PgHost            string `json:"pg_host"`
 	DashboardHostname string `json:"dashboard_hostname"`
 }
 

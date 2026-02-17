@@ -1,14 +1,4 @@
 services:
-  redis-counting:
-    build: ./redis-counting
-    restart: always
-    # Disable persistence (RDB and AOF)
-    command: redis-server --save "" --appendonly no
-    ports:
-      - "6379:6379"
-    networks:
-      - demo-network
-
   counting-service:
     image: winyannainghtut/counting-service:latest
     build: ./counting-service
@@ -16,9 +6,7 @@ services:
       - "9001:9001"
     environment:
       - PORT=9001
-      - REDIS_URL=redis-counting:6379
-    depends_on:
-      - redis-counting
+      - STORAGE_MODE=memory
     networks:
       - demo-network
 
