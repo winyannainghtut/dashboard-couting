@@ -212,3 +212,26 @@ GitHub Actions workflow:
 - `.github/workflows/ci-cd.yml`
 
 It builds and publishes both service images.
+
+## Binary Release CI/CD
+
+A dedicated workflow builds and publishes service binaries to GitHub Releases:
+
+- `.github/workflows/release-binaries.yml`
+
+Trigger:
+
+- Push a version tag matching `v*` (example: `v1.0.0`).
+
+Example:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Release assets include:
+
+- `counting-service` binaries for Linux, macOS, and Windows
+- `dashboard-service` binaries for Linux, macOS, and Windows
+- SHA256 checksum files

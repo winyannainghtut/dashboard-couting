@@ -264,6 +264,7 @@ type Count struct {
 	Message           string `json:"message"`
 	Hostname          string `json:"hostname"`
 	DashboardHostname string `json:"dashboard_hostname"`
+	DBNode            string `json:"db_node,omitempty"`
 }
 
 func getAndParseCount() (Count, error) {

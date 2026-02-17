@@ -1,0 +1,100 @@
+name: Release Service Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: counting-service
+            binary_name: counting-service
+            go_version: "1.24.x"
+          - service: dashboard-service
+            binary_name: dashboard-service
+            go_version: "1.21.x"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go_version }}
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SERVICE="${{ matrix.service }}"
+          BIN="${{ matrix.binary_name }}"
+          mkdir -p dist
+
+          pushd "$SERVICE" >/dev/null
+
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r GOOS GOARCH <<< "$target"
+            EXT=""
+            if [[ "$GOOS" == "windows" ]]; then
+              EXT=".exe"
+            fi
+
+            RAW_NAME="${BIN}_${GOOS}_${GOARCH}${EXT}"
+            RAW_PATH="../dist/${RAW_NAME}"
+
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath -ldflags="-s -w" -o "$RAW_PATH" .
+
+            if [[ "$GOOS" == "windows" ]]; then
+              (cd ../dist && zip -q "${BIN}_${GOOS}_${GOARCH}.zip" "$RAW_NAME")
+            else
+              (cd ../dist && tar -czf "${BIN}_${GOOS}_${GOARCH}.tar.gz" "$RAW_NAME")
+            fi
+
+            rm -f "$RAW_PATH"
+          done
+
+          popd >/dev/null
+
+          (cd dist && sha256sum * > "SHA256SUMS_${BIN}.txt")
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.service }}
+          path: dist/*
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
