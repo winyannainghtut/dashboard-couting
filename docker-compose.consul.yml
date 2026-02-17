@@ -1,0 +1,65 @@
+services:
+  consul:
+    image: hashicorp/consul:1.19
+    entrypoint:
+      - consul
+    command:
+      - agent
+      - -server
+      - -bootstrap-expect=1
+      - -node=consul-1
+      - -ui
+      - -client=0.0.0.0
+      - -bind=0.0.0.0
+      - -data-dir=/consul/data
+      - -config-dir=/consul/config
+    ports:
+      - "8500:8500"
+      - "8600:8600/tcp"
+      - "8600:8600/udp"
+    volumes:
+      - ./consul/config:/consul/config:ro
+      - consul-data:/consul/data
+    networks:
+      demo-network:
+        ipv4_address: 172.30.0.2
+
+  counting-service:
+    image: winyannainghtut/counting-service:latest
+    build: ./counting-service
+    ports:
+      - "9001:9001"
+    environment:
+      - PORT=9001
+      - STORAGE_MODE=memory
+    depends_on:
+      - consul
+    networks:
+      demo-network:
+        ipv4_address: 172.30.0.3
+
+  dashboard-service:
+    image: winyannainghtut/dashboard-service:latest
+    build: ./dashboard-service
+    ports:
+      - "9002:9002"
+    environment:
+      - PORT=9002
+      - COUNTING_SERVICE_URL=http://counting.service.consul:9001
+      - CONSUL_DNS_ADDR=consul:8600
+    depends_on:
+      - consul
+      - counting-service
+    networks:
+      demo-network:
+        ipv4_address: 172.30.0.4
+
+networks:
+  demo-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  consul-data:

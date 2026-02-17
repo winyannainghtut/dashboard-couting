@@ -114,6 +114,33 @@ func normalizeDNSServerAddr(dnsServer string) string {
 	return net.JoinHostPort(dnsServer, defaultDNSPort)
 }
 
+func resolveDNSServerHostToIP(dnsServer string) string {
+	host, port, err := net.SplitHostPort(dnsServer)
+	if err != nil {
+		return dnsServer
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		return dnsServer
+	}
+
+	ips, lookupErr := net.LookupIP(host)
+	if lookupErr != nil || len(ips) == 0 {
+		log.Printf("Unable to resolve DNS server host %q: %v. Using as-is.", host, lookupErr)
+		return dnsServer
+	}
+
+	selectedIP := ips[0]
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			selectedIP = ip
+			break
+		}
+	}
+
+	return net.JoinHostPort(selectedIP.String(), port)
+}
+
 func configureCustomDNSResolver() {
 	dnsServer := getCustomDNSServer()
 	if dnsServer == "" {
@@ -121,6 +148,7 @@ func configureCustomDNSResolver() {
 	}
 
 	dnsServer = normalizeDNSServerAddr(dnsServer)
+	dnsServer = resolveDNSServerHostToIP(dnsServer)
 	dnsNetwork := getCustomDNSNetwork()
 	dnsTimeout := getCustomDNSTimeout()
 

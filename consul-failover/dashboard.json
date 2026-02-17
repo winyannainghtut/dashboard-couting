@@ -1,0 +1,15 @@
+{
+  "service": {
+    "id": "dashboard",
+    "name": "dashboard",
+    "address": "172.31.0.4",
+    "port": 9002,
+    "check": {
+      "id": "dashboard-check",
+      "http": "http://172.31.0.4:9002/health",
+      "method": "GET",
+      "interval": "1s",
+      "timeout": "1s"
+    }
+  }
+}
