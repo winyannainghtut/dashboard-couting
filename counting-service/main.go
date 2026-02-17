@@ -9,14 +9,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+const defaultDBRequestTimeout = 1 * time.Second
+const defaultDNSNetwork = "udp"
+const defaultDNSPort = "53"
+const defaultDNSTimeout = 1500 * time.Millisecond
 
 // CounterStore describes storage operations for the counter.
 type CounterStore interface {
@@ -85,7 +93,7 @@ func (c *CockroachStore) Incr(ctx context.Context) (int64, error) {
 
 func (c *CockroachStore) GetDBNode(ctx context.Context) (string, error) {
 	var nodeID int64
-	err := c.db.QueryRowContext(ctx, `SELECT node_id FROM crdb_internal.node_runtime_info LIMIT 1`).Scan(&nodeID)
+	err := c.db.QueryRowContext(ctx, `SELECT crdb_internal.node_id()`).Scan(&nodeID)
 	if err != nil {
 		return "", err
 	}
@@ -97,7 +105,83 @@ func writeJSON(w http.ResponseWriter, payload Count) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func getCustomDNSServer() string {
+	dnsServer := strings.TrimSpace(os.Getenv("DNS_SERVER"))
+	if dnsServer != "" {
+		return dnsServer
+	}
+	return strings.TrimSpace(os.Getenv("CONSUL_DNS_ADDR"))
+}
+
+func getCustomDNSNetwork() string {
+	dnsNetwork := strings.TrimSpace(os.Getenv("DNS_NETWORK"))
+	if dnsNetwork == "" {
+		return defaultDNSNetwork
+	}
+	return dnsNetwork
+}
+
+func getCustomDNSTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("DNS_TIMEOUT_MS"))
+	if raw == "" {
+		return defaultDNSTimeout
+	}
+
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		log.Printf("Invalid DNS_TIMEOUT_MS=%q. Using default %s.", raw, defaultDNSTimeout)
+		return defaultDNSTimeout
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
+func getDBRequestTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("DB_REQUEST_TIMEOUT_MS"))
+	if raw == "" {
+		return defaultDBRequestTimeout
+	}
+
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		log.Printf("Invalid DB_REQUEST_TIMEOUT_MS=%q. Using default %s.", raw, defaultDBRequestTimeout)
+		return defaultDBRequestTimeout
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
+func normalizeDNSServerAddr(dnsServer string) string {
+	if _, _, err := net.SplitHostPort(dnsServer); err == nil {
+		return dnsServer
+	}
+	return net.JoinHostPort(dnsServer, defaultDNSPort)
+}
+
+func configureCustomDNSResolver() {
+	dnsServer := getCustomDNSServer()
+	if dnsServer == "" {
+		return
+	}
+
+	dnsServer = normalizeDNSServerAddr(dnsServer)
+	dnsNetwork := getCustomDNSNetwork()
+	dnsTimeout := getCustomDNSTimeout()
+
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: dnsTimeout}
+			return dialer.DialContext(ctx, dnsNetwork, dnsServer)
+		},
+	}
+
+	log.Printf("Custom DNS resolver enabled: %s://%s", dnsNetwork, dnsServer)
+}
+
 func main() {
+	configureCustomDNSResolver()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "9001"
@@ -130,7 +214,7 @@ func main() {
 
 	router := mux.NewRouter()
 	router.HandleFunc("/health", HealthHandler)
-	router.Handle("/", CountHandler{store: store})
+	router.Handle("/", CountHandler{store: store, dbRequestTimeout: getDBRequestTimeout()})
 
 	// Serve!
 	fmt.Printf("Serving at http://localhost:%s\n", port)
@@ -155,13 +239,14 @@ type Count struct {
 // CountHandler serves a JSON feed that contains a number that increments each time
 // the API is called.
 type CountHandler struct {
-	store CounterStore
+	store            CounterStore
+	dbRequestTimeout time.Duration
 }
 
 func (h CountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hostname, _ := os.Hostname()
 
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), h.dbRequestTimeout)
 	defer cancel()
 
 	newCount, err := h.store.Incr(ctx)

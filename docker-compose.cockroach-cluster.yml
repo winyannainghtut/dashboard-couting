@@ -1,0 +1,102 @@
+name: dashboard-couting-cluster
+
+services:
+  roach1:
+    image: cockroachdb/cockroach:latest
+    hostname: roach1
+    command: start --insecure --listen-addr=0.0.0.0:26257 --advertise-addr=roach1:26257 --http-addr=0.0.0.0:8080 --join=roach1:26257,roach2:26257,roach3:26257
+    ports:
+      - "26257:26257"
+      - "8081:8080"
+    volumes:
+      - roach1-data:/cockroach/cockroach-data
+    networks:
+      demo-network:
+        aliases:
+          - roachdb
+
+  roach2:
+    image: cockroachdb/cockroach:latest
+    hostname: roach2
+    command: start --insecure --listen-addr=0.0.0.0:26257 --advertise-addr=roach2:26257 --http-addr=0.0.0.0:8080 --join=roach1:26257,roach2:26257,roach3:26257
+    ports:
+      - "26258:26257"
+      - "8082:8080"
+    volumes:
+      - roach2-data:/cockroach/cockroach-data
+    networks:
+      demo-network:
+        aliases:
+          - roachdb
+
+  roach3:
+    image: cockroachdb/cockroach:latest
+    hostname: roach3
+    command: start --insecure --listen-addr=0.0.0.0:26257 --advertise-addr=roach3:26257 --http-addr=0.0.0.0:8080 --join=roach1:26257,roach2:26257,roach3:26257
+    ports:
+      - "26259:26257"
+      - "8083:8080"
+    volumes:
+      - roach3-data:/cockroach/cockroach-data
+    networks:
+      demo-network:
+        aliases:
+          - roachdb
+
+  cluster-init:
+    image: cockroachdb/cockroach:latest
+    entrypoint:
+      - /bin/sh
+      - -ec
+    depends_on:
+      - roach1
+      - roach2
+      - roach3
+    command:
+      - |
+        until /cockroach/cockroach sql --insecure --host=roach1:26257 -e 'SELECT 1' >/dev/null 2>&1; do
+          /cockroach/cockroach init --insecure --host=roach1:26257 >/dev/null 2>&1 || true
+          sleep 2
+        done
+    restart: "no"
+    networks:
+      - demo-network
+
+  counting-service:
+    image: winyannainghtut/counting-service:latest
+    build: ./counting-service
+    ports:
+      - "9001:9001"
+    environment:
+      - PORT=9001
+      - STORAGE_MODE=cockroach
+      - PG_URL=postgresql://root@roachdb:26257/defaultdb?sslmode=disable&connect_timeout=1
+      - DB_REQUEST_TIMEOUT_MS=4000
+    depends_on:
+      cluster-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - demo-network
+
+  dashboard-service:
+    image: winyannainghtut/dashboard-service:latest
+    build: ./dashboard-service
+    ports:
+      - "8080:80"
+    environment:
+      - PORT=80
+      - COUNTING_SERVICE_URL=http://counting-service:9001
+    depends_on:
+      - counting-service
+    networks:
+      - demo-network
+
+networks:
+  demo-network:
+    driver: bridge
+
+volumes:
+  roach1-data:
+  roach2-data:
+  roach3-data:
