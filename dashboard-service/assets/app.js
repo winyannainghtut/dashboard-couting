@@ -22,7 +22,7 @@ function connect() {
   ws.onmessage = function (event) {
     var message = JSON.parse(event.data);
 
-    if (message.count < 0) {
+    if (message.hostname === "[Unreachable]") {
       disconnectedFromBackendService();
     } else {
       didConnect();
@@ -77,29 +77,9 @@ function showCount(message) {
   document.getElementById("hostname").textContent = message.hostname;
   document.getElementById("dashboard-hostname").textContent =
     message.dashboard_hostname;
+  document.getElementById("db-node").textContent =
+    message.db_node || "Unavailable";
 
-  var redisHostEl = document.getElementById("redis-hostname");
-  var pgHostEl = document.getElementById("pg-hostname");
-  var redisCard = document.getElementById("redis-card");
-  var pgCard = document.getElementById("pg-card");
-
-  var mode = message.storage_mode || "redis";
-
-  if (mode === "postgres") {
-    // PostgreSQL is active
-    pgHostEl.textContent = message.pg_host || "Connected";
-    pgCard.classList.remove("inactive-card");
-    // Redis is not in use
-    redisHostEl.textContent = "Redis is not in use";
-    redisCard.classList.add("inactive-card");
-  } else {
-    // Redis is active
-    redisHostEl.textContent = message.redis_host || "Unknown";
-    redisCard.classList.remove("inactive-card");
-    // PostgreSQL is not in use
-    pgHostEl.textContent = "PostgreSQL is not in use";
-    pgCard.classList.add("inactive-card");
-  }
 }
 
 function disconnected() {

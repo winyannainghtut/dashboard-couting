@@ -1,218 +1,214 @@
 # Dashboard-Counting
 
-This repository contains a demonstration of a microservices architecture using Consul for service discovery. It consists of two main services: `counting-service` and `dashboard-service`.
+This repository demonstrates a 3-tier microservice setup:
+
+- `dashboard-service` (UI)
+- `counting-service` (API/business logic)
+- `cockroachdb/cockroach` (database tier)
+
+## Architecture
+
+`Browser -> Dashboard Service -> Counting Service -> CockroachDB`
+
+Dashboard displays:
+
+- Live count
+- Counting service hostname
+- Dashboard service hostname
+- Active CockroachDB node (for single-node setup: `Node 1`)
 
 ## Services
 
 ### Counting Service
-A backend service written in Go regarding counting logic.
-- **Port**: 9001 (default)
-- **Path**: `/counting-service`
-- **Configuration**:
 
-  | Variable | Values | Default | Description |
-  |----------|--------|---------|-------------|
-  | `PORT` | any port | `9001` | Service listen port |
-  | `STORAGE_MODE` | `redis`, `memory`, `postgres` | `redis` | Storage backend to use |
+- Default port: `9001`
+- Endpoint: `GET /`
+- Health: `GET /health`
+- Environment variables:
+  - `PORT` (default `9001`)
+  - `STORAGE_MODE` (`memory` or `cockroach`)
+  - `PG_URL` (required when `STORAGE_MODE=cockroach`)
+  - `DB_REQUEST_TIMEOUT_MS` (optional DB request timeout in milliseconds, default `1000`)
+  - `DNS_SERVER` (optional custom DNS server, e.g. `127.0.0.1:8600`)
+  - `CONSUL_DNS_ADDR` (optional alias of `DNS_SERVER`, useful for Consul DNS)
+  - `DNS_NETWORK` (optional DNS protocol: `udp` or `tcp`, default `udp`)
+  - `DNS_TIMEOUT_MS` (optional DNS dial timeout in milliseconds, default `1500`)
 
-  **Redis Options** (when `STORAGE_MODE=redis`):
+Response shape:
 
-  | Variable | Values | Default | Description |
-  |----------|--------|---------|-------------|
-  | `REDIS_URL` | `host:port` | `localhost:6379` | Redis server address (Single mode) |
-  | `REDIS_MODE` | `single`, `sentinel`, `cluster` | `single` | Redis deployment topology |
-  | `REDIS_MASTER_NAME` | string | `mymaster` | Sentinel master set name (Sentinel mode) |
-  | `REDIS_SENTINEL_ADDRS` | `host1:port,host2:port,...` | — | Comma-separated Sentinel addresses |
-  | `REDIS_CLUSTER_ADDRS` | `host1:port,host2:port,...` | — | Comma-separated Cluster seed nodes |
+```json
+{
+  "count": 1,
+  "hostname": "counting-container-id",
+  "db_node": "Node 1"
+}
+```
 
-  **PostgreSQL Options** (when `STORAGE_MODE=postgres`):
+If DB is down/unreachable:
 
-  | Variable | Values | Default | Description |
-  |----------|--------|---------|-------------|
-  | `PG_URL` | connection string | — | e.g. `postgres://user:pass@host:5432/db?sslmode=disable` |
-  | `PG_MODE` | `single`, `cluster` | `single` | PostgreSQL deployment topology |
-
-### Redis Architecture Notes
-When choosing between **Redis Cluster** and **Redis Sentinel**:
-- **Redis Sentinel**: Best for High Availability (HA) with smaller datasets.
-  - Recommended minimum: 1 Master + 1 Replica + 3 Sentinels (works with 2-3 nodes).
-  - Handles failover automatically if the master dies.
-- **Redis Cluster**: Best for large datasets that need sharding (Partitioning).
-  - **Required minimum**: 3 Master nodes (for consensus/quorum).
-  - **Recommended for HA**: 6 Nodes (3 Masters + 3 Replicas) to survive node failures without data loss.
-  - A 3-node cluster (Masters only) will **stop working** if a single node fails, because data is sharded and redundancy is lost.
-
-### PostgreSQL Architecture Notes
-The counting-service also supports PostgreSQL as a backend (`STORAGE_MODE=postgres`).
-- **Single Mode**: One `bitnami/postgresql` instance. Simple and reliable.
-  - Use `docker-compose.postgres.yml` to test.
-- **Cluster Mode** (`PG_MODE=cluster`): Uses `bitnami/postgresql` streaming replication (1 Master + 2 Slaves).
-  - Slaves stream WAL from the master for real-time read replicas.
-  - If the master fails, a slave can be promoted via trigger file (`/tmp/postgresql.trigger.5432`).
-  - Use `docker-compose.postgres-cluster.yml` to test.
+```json
+{
+  "count": -1,
+  "hostname": "counting-container-id",
+  "message": "DB Error: ..."
+}
+```
 
 ### Dashboard Service
-A frontend service that displays the count from the counting service.
-- **Port**: 80 (default)
-- **Path**: `/dashboard-service`
 
-### Redis Service
-A Redis instance that stores the count state.
-- **Port**: 6379
-- **Persistence**: Disabled (count resets on restart) for demo purposes.
+- Default port: `80` (mapped to host `8080` in compose)
+- Health: `GET /health`
+- API connectivity health: `GET /health/api`
+- WebSocket: `GET /ws`
+- Environment variables:
+  - `PORT` (default `80`)
+  - `COUNTING_SERVICE_URL` (default `http://localhost:9001`)
+  - `DNS_SERVER` (optional custom DNS server, e.g. `127.0.0.1:8600`)
+  - `CONSUL_DNS_ADDR` (optional alias of `DNS_SERVER`, useful for Consul DNS)
+  - `DNS_NETWORK` (optional DNS protocol: `udp` or `tcp`, default `udp`)
+  - `DNS_TIMEOUT_MS` (optional DNS dial timeout in milliseconds, default `1500`)
 
-## Architecture
+## Docker Compose (3-Tier Single DB)
 
-The system uses a Service-to-Service pattern where the Dashboard Service communicates with the Counting Service, which in turn persists data to Redis.
-
-**Features:**
-- **Graceful Degradation**: If Redis is unavailable, the Counting Service returns a fallback response, and the Dashboard displays a visual error banner.
-- **Observability**: The Dashboard displays the hostname of the backend container and the unique Run ID of the Redis instance.
-
-```mermaid
-graph TD
-    User((User))
-    
-    subgraph "Docker Network"
-        DS[Dashboard Service]
-        CS[Counting Service]
-        Redis[(Redis)]
-        
-        DS -- HTTP GET --> CS
-        CS -- INCR --> Redis
-    end
-    
-    User -- Browser --> DS
-```
-
-## Local Development
-
-### Prerequisites
-- Go 1.22+
-- Docker
-
-### Running Locally
-To run the services locally:
-
-1. **Counting Service**:
-    ```bash
-    cd counting-service
-    go run main.go
-    ```
-
-2. **Dashboard Service**:
-    ```bash
-    cd dashboard-service
-    go run main.go
-    ```
-
-### Standalone Mode (No Redis)
-You can run the `counting-service` in standalone mode, where it uses an in-memory counter instead of Redis. This is useful for development or simple deployments where persistence is not required.
-
-To enable standalone mode, set the `STORAGE_MODE` environment variable to `memory`.
-
-**PowerShell:**
-```powershell
-$env:PORT="9001"; $env:STORAGE_MODE="memory"; go run main.go
-```
-
-**Bash:**
-```bash
-PORT=9001 STORAGE_MODE=memory go run main.go
-```
-
-## Docker
-
-You can build and run the services using Docker. Each service has its own `Dockerfile`.
-
-### Building Images
+Run:
 
 ```bash
-# Counting Service
-docker build -t counting-service ./counting-service
-
-# Dashboard Service
-docker build -t dashboard-service ./dashboard-service
+docker compose up --build
 ```
 
-### Running Containers
+Access:
 
-You can run the containers individually using `docker run`:
+- Dashboard UI: `http://localhost:8080`
+- Counting API: `http://localhost:9001`
+- Cockroach SQL (host): `localhost:26257`
+- Cockroach DB Console: `http://localhost:8081`
+
+Notes:
+
+- Cockroach runs single-node insecure mode for local development only.
+- Internally, Cockroach SQL listens on container port `26258`, mapped to host port `26257`.
+
+## Docker Compose (CockroachDB Cluster)
+
+A separate compose file is available for a 3-node CockroachDB cluster:
 
 ```bash
-docker run -p 9001:9001 winyannainghtut/counting-service:latest
-docker run -p 8080:80 winyannainghtut/dashboard-service:latest
+docker compose -f docker-compose.cockroach-cluster.yml up --build
 ```
 
-### Docker Compose
+Access:
 
-Alternatively, you can run both services together using Docker Compose.
+- Dashboard UI: `http://localhost:8080`
+- Counting API: `http://localhost:9001`
+- Cockroach Node 1 SQL/UI: `localhost:26257` / `http://localhost:8081`
+- Cockroach Node 2 SQL/UI: `localhost:26258` / `http://localhost:8082`
+- Cockroach Node 3 SQL/UI: `localhost:26259` / `http://localhost:8083`
 
-**Note:** You must pull the Docker images locally before running the services.
+In this cluster compose file, all Cockroach nodes share the Docker DNS alias `roachdb`, and `counting-service` connects via `PG_URL=...@roachdb:26257...` for smoother node failover.
+
+This file also sets an explicit Compose project name (`dashboard-couting-cluster`) to avoid collisions with the default `docker-compose.yml` stack.
+
+Important: with 3 nodes, Cockroach tolerates 1 node failure for writes (quorum). If 2 nodes are down, write operations will fail.
+
+## Consul DNS Example
+
+If you run Consul and want DNS-based service discovery, you can point both services at Consul DNS:
 
 ```bash
-# Pull the images
-docker pull winyannainghtut/counting-service:latest
-docker pull winyannainghtut/dashboard-service:latest
+# counting-service
+set CONSUL_DNS_ADDR=127.0.0.1:8600
 
-# Run the services (and build local changes)
-docker-compose up --build
+# dashboard-service
+set CONSUL_DNS_ADDR=127.0.0.1:8600
+set COUNTING_SERVICE_URL=http://counting-service.service.consul:9001
 ```
 
-## Testing Scenarios
+`DNS_SERVER` and `CONSUL_DNS_ADDR` are interchangeable. If both are set, `DNS_SERVER` is used.
 
-You can verify the system's robustness by forcing failures:
+## Behavior During DB Failure
 
-### 1. Redis Failure (Graceful Degradation)
-**Scenario**: Stop Redis but keep other services running.
+When CockroachDB is unavailable:
+
+- `counting-service` stays up.
+- API returns `count: -1` with an error `message`.
+- API still returns the `hostname` of counting service.
+- Dashboard continues showing counting hostname and marks DB information as unavailable.
+
+## Verify Data In CockroachDB
+
+After the stack is running, you can verify writes directly from CockroachDB.
+
+### Cluster Compose
+
+Open SQL shell on node 1:
+
 ```bash
-docker stop demo-consul-101-redis-counting-1
+docker compose -f docker-compose.cockroach-cluster.yml exec roach1 /cockroach/cockroach sql --insecure --host=roach1:26257
 ```
-**Expected Result**:
-- Dashboard: Shows a red error banner (e.g., "Redis Error: ...").
-- Count: Shows "!" or error state.
-- **Critical**: The "Counting Service" hostname card **still displays a valid ID**. This proves the backend service is alive and handling the error gracefully.
-- Redis Run ID: Shows "Unknown".
 
-**Resume**:
+Run:
+
+```sql
+USE defaultdb;
+SHOW TABLES;
+SELECT id, count FROM counts;
+```
+
+Quick end-to-end check:
+
 ```bash
-docker start demo-consul-101-redis-counting-1
+curl http://localhost:9001/
+curl http://localhost:9001/
+docker compose -f docker-compose.cockroach-cluster.yml exec roach1 /cockroach/cockroach sql --insecure --host=roach1:26257 -e "SELECT id, count FROM counts;"
 ```
-**Expected Result**: Application recovers automatically. Error banner disappears, and count resumes.
 
-### 2. Counting Service Failure
-**Scenario**: Stop the backend service.
+### Single-Node Compose
+
+Open SQL shell:
+
 ```bash
-docker stop demo-consul-101-counting-service-1
+docker compose exec roach1 /cockroach/cockroach sql --insecure --host=roach1:26258
 ```
-**Expected Result**:
-- Dashboard: Shows "Counting Service is Unreachable" in the status badge.
-- **Resilience**: The **Dashboard Hostname** card remains visible and valid, proving the frontend service is functioning.
-- Count/Backend Info: Shows error or "Waiting...".
 
-### 3. Data Persistence Test
-**Scenario**: Verify if data survives a restart.
-1. Increment the count a few times.
-2. Restart the stack: `docker-compose restart`
-3. Check if count continues or resets to 1.
+Run:
 
-**Configuration**:
-- **Ephemeral (Current Default)**: Count **resets to 1**.
-  configured in `docker-compose.yml`:
-  ```yaml
-  command: redis-server --save "" --appendonly no
-  ```
-- **Persistent**: Count **continues**.
-  To enable, remove the `command` line in `docker-compose.yml` and restart (`docker-compose up --build --force-recreate`).
+```sql
+USE defaultdb;
+SHOW TABLES;
+SELECT id, count FROM counts;
+```
 
-## CI/CD Pipeline
+If `counts` does not exist yet, call `http://localhost:9001/` once first. The table is created lazily by `counting-service`.
 
-The project uses GitHub Actions for Continuous Integration and Deployment. 
+## Local Development (Without Docker)
 
-- **Workflow**: `.github/workflows/ci-cd.yml`
-- **Trigger**: Pushes and Pull Requests to the `main` branch.
-- **Actions**:
-    - Builds Docker images for both services in parallel.
-    - Pushes images to Docker Hub using secrets `DOCKER_USERNAME` and `DOCKER_PASSWORD`.
+Prerequisites:
 
-To view the workflow runs, navigate to the **Actions** tab in the GitHub repository.
+- Go 1.24+ (for `counting-service`)
+- Go 1.21+ (for `dashboard-service`)
+
+Run counting service in memory mode:
+
+```bash
+cd counting-service
+set STORAGE_MODE=memory
+set PORT=9001
+go run main.go
+```
+
+Run dashboard service:
+
+```bash
+cd dashboard-service
+set PORT=80
+set COUNTING_SERVICE_URL=http://localhost:9001
+go run main.go
+```
+
+## CI/CD
+
+GitHub Actions workflow:
+
+- `.github/workflows/ci-cd.yml`
+
+It builds and publishes both service images.

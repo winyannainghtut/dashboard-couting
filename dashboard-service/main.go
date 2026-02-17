@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"expvar"
@@ -11,13 +12,21 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+const countingRequestTimeout = 4 * time.Second
+const defaultDNSNetwork = "udp"
+const defaultDNSPort = "53"
+const defaultDNSTimeout = 1500 * time.Millisecond
 
 //go:embed assets
 var staticFiles embed.FS
@@ -32,6 +41,8 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
+	configureCustomDNSResolver()
+
 	port = getEnvOrDefault("PORT", "80")
 	portWithColon := fmt.Sprintf(":%s", port)
 
@@ -63,6 +74,65 @@ func getEnvOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func getCustomDNSServer() string {
+	dnsServer := strings.TrimSpace(os.Getenv("DNS_SERVER"))
+	if dnsServer != "" {
+		return dnsServer
+	}
+	return strings.TrimSpace(os.Getenv("CONSUL_DNS_ADDR"))
+}
+
+func getCustomDNSNetwork() string {
+	dnsNetwork := strings.TrimSpace(os.Getenv("DNS_NETWORK"))
+	if dnsNetwork == "" {
+		return defaultDNSNetwork
+	}
+	return dnsNetwork
+}
+
+func getCustomDNSTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("DNS_TIMEOUT_MS"))
+	if raw == "" {
+		return defaultDNSTimeout
+	}
+
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		log.Printf("Invalid DNS_TIMEOUT_MS=%q. Using default %s.", raw, defaultDNSTimeout)
+		return defaultDNSTimeout
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
+func normalizeDNSServerAddr(dnsServer string) string {
+	if _, _, err := net.SplitHostPort(dnsServer); err == nil {
+		return dnsServer
+	}
+	return net.JoinHostPort(dnsServer, defaultDNSPort)
+}
+
+func configureCustomDNSResolver() {
+	dnsServer := getCustomDNSServer()
+	if dnsServer == "" {
+		return
+	}
+
+	dnsServer = normalizeDNSServerAddr(dnsServer)
+	dnsNetwork := getCustomDNSNetwork()
+	dnsTimeout := getCustomDNSTimeout()
+
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: dnsTimeout}
+			return dialer.DialContext(ctx, dnsNetwork, dnsServer)
+		},
+	}
+
+	log.Printf("Custom DNS resolver enabled: %s://%s", dnsNetwork, dnsServer)
 }
 
 // HealthHandler returns a successful status and a message.
@@ -166,10 +236,8 @@ type Count struct {
 	Count             int    `json:"count"`
 	Message           string `json:"message"`
 	Hostname          string `json:"hostname"`
-	StorageMode       string `json:"storage_mode"`
-	RedisHost         string `json:"redis_host"`
-	PgHost            string `json:"pg_host"`
 	DashboardHostname string `json:"dashboard_hostname"`
+	DBNode            string `json:"db_node,omitempty"`
 }
 
 func getAndParseCount() (Count, error) {
@@ -180,7 +248,7 @@ func getAndParseCount() (Count, error) {
 	}
 
 	httpClient := http.Client{
-		Timeout:   time.Second * 2,
+		Timeout:   countingRequestTimeout,
 		Transport: tr,
 	}
 

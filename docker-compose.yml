@@ -1,11 +1,12 @@
 services:
-  redis-counting:
-    build: ./redis-counting
-    restart: always
-    # Disable persistence (RDB and AOF)
-    command: redis-server --save "" --appendonly no
+  roach1:
+    image: cockroachdb/cockroach:latest
+    command: start-single-node --insecure --accept-sql-without-tls --listen-addr=localhost:26257 --sql-addr=0.0.0.0:26258 --http-addr=0.0.0.0:8080
     ports:
-      - "6379:6379"
+      - "26257:26258"
+      - "8081:8080"
+    volumes:
+      - roach1-data:/cockroach/cockroach-data
     networks:
       - demo-network
 
@@ -16,9 +17,11 @@ services:
       - "9001:9001"
     environment:
       - PORT=9001
-      - REDIS_URL=redis-counting:6379
+      - STORAGE_MODE=cockroach
+      - PG_URL=postgresql://root@roach1:26258/defaultdb?sslmode=disable&connect_timeout=1
     depends_on:
-      - redis-counting
+      - roach1
+    restart: on-failure
     networks:
       - demo-network
 
@@ -32,9 +35,13 @@ services:
       - COUNTING_SERVICE_URL=http://counting-service:9001
     depends_on:
       - counting-service
+      - roach1
     networks:
       - demo-network
 
 networks:
   demo-network:
     driver: bridge
+
+volumes:
+  roach1-data:
