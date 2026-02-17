@@ -53,32 +53,28 @@ func NewCockroachStore(pgURL string) (*CockroachStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	return &CockroachStore{db: db}, nil
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		return nil, err
-	}
-
-	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS counts (
+func (c *CockroachStore) ensureSchema(ctx context.Context) error {
+	_, err := c.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS counts (
 		id INT PRIMARY KEY,
 		count BIGINT NOT NULL
 	)`)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	_, err = db.ExecContext(ctx, `INSERT INTO counts (id, count) VALUES (1, 0)
+	_, err = c.db.ExecContext(ctx, `INSERT INTO counts (id, count) VALUES (1, 0)
 		ON CONFLICT (id) DO NOTHING`)
-	if err != nil {
-		return nil, err
-	}
-
-	return &CockroachStore{db: db}, nil
+	return err
 }
 
 func (c *CockroachStore) Incr(ctx context.Context) (int64, error) {
+	if err := c.ensureSchema(ctx); err != nil {
+		return 0, err
+	}
+
 	var count int64
 	err := c.db.QueryRowContext(ctx, `UPDATE counts SET count = count + 1 WHERE id = 1 RETURNING count`).Scan(&count)
 	if err != nil {

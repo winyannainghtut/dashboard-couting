@@ -1,111 +1,122 @@
 # Dashboard-Counting
 
-This repository contains a demonstration of a microservices architecture using Consul for service discovery. It consists of two main services: `counting-service` and `dashboard-service`.
+This repository demonstrates a 3-tier microservice setup:
+
+- `dashboard-service` (UI)
+- `counting-service` (API/business logic)
+- `cockroachdb/cockroach` (database tier)
+
+## Architecture
+
+`Browser -> Dashboard Service -> Counting Service -> CockroachDB`
+
+Dashboard displays:
+
+- Live count
+- Counting service hostname
+- Dashboard service hostname
+- Active CockroachDB node (for single-node setup: `Node 1`)
 
 ## Services
 
 ### Counting Service
-A backend service written in Go regarding counting logic.
-- **Port**: 9001 (default)
-- **Path**: `/counting-service`
-- **Configuration**:
-  - `PORT`: Service port (default: 9001).
-  - `STORAGE_MODE`: Only `memory` is supported in this version.
+
+- Default port: `9001`
+- Endpoint: `GET /`
+- Health: `GET /health`
+- Environment variables:
+  - `PORT` (default `9001`)
+  - `STORAGE_MODE` (`memory` or `cockroach`)
+  - `PG_URL` (required when `STORAGE_MODE=cockroach`)
+
+Response shape:
+
+```json
+{
+  "count": 1,
+  "hostname": "counting-container-id",
+  "db_node": "Node 1"
+}
+```
+
+If DB is down/unreachable:
+
+```json
+{
+  "count": -1,
+  "hostname": "counting-container-id",
+  "message": "DB Error: ..."
+}
+```
 
 ### Dashboard Service
-A frontend service that displays the count from the counting service.
-- **Port**: 80 (default)
-- **Path**: `/dashboard-service`
 
-## Architecture
+- Default port: `80` (mapped to host `8080` in compose)
+- Health: `GET /health`
+- API connectivity health: `GET /health/api`
+- WebSocket: `GET /ws`
+- Environment variables:
+  - `PORT` (default `80`)
+  - `COUNTING_SERVICE_URL` (default `http://localhost:9001`)
 
-The system uses a Service-to-Service pattern where the Dashboard Service communicates with the Counting Service.
+## Docker Compose (3-Tier Single DB)
 
-**Features:**
-- **In-Memory Storage**: The counting service uses an in-memory variable to store the count. Data is lost on restart.
-- **Observability**: The Dashboard displays the hostname of the backend container.
-
-```mermaid
-graph TD
-    User((User))
-    
-    subgraph "Docker Network"
-        DS[Dashboard Service]
-        CS[Counting Service]
-        
-        DS -- HTTP GET --> CS
-    end
-    
-    User -- Browser --> DS
-```
-
-## Local Development
-
-### Prerequisites
-- Go 1.22+
-- Docker
-
-### Running Locally
-To run the services locally:
-
-1. **Counting Service**:
-    ```bash
-    cd counting-service
-    go run main.go
-    ```
-
-2. **Dashboard Service**:
-    ```bash
-    cd dashboard-service
-    go run main.go
-    ```
-
-## Docker
-
-You can build and run the services using Docker. Each service has its own `Dockerfile`.
-
-### Building Images
+Run:
 
 ```bash
-# Counting Service
-docker build -t counting-service ./counting-service
-
-# Dashboard Service
-docker build -t dashboard-service ./dashboard-service
+docker compose up --build
 ```
 
-### Running Containers
+Access:
 
-You can run the containers individually using `docker run`:
+- Dashboard UI: `http://localhost:8080`
+- Counting API: `http://localhost:9001`
+- Cockroach SQL (host): `localhost:26257`
+- Cockroach DB Console: `http://localhost:8081`
+
+Notes:
+
+- Cockroach runs single-node insecure mode for local development only.
+- Internally, Cockroach SQL listens on container port `26258`, mapped to host port `26257`.
+
+## Behavior During DB Failure
+
+When CockroachDB is unavailable:
+
+- `counting-service` stays up.
+- API returns `count: -1` with an error `message`.
+- API still returns the `hostname` of counting service.
+- Dashboard continues showing counting hostname and marks DB information as unavailable.
+
+## Local Development (Without Docker)
+
+Prerequisites:
+
+- Go 1.24+ (for `counting-service`)
+- Go 1.21+ (for `dashboard-service`)
+
+Run counting service in memory mode:
 
 ```bash
-docker run -p 9001:9001 winyannainghtut/counting-service:latest
-docker run -p 8080:80 winyannainghtut/dashboard-service:latest
+cd counting-service
+set STORAGE_MODE=memory
+set PORT=9001
+go run main.go
 ```
 
-### Docker Compose
-
-Alternatively, you can run both services together using Docker Compose.
-
-**Note:** You must pull the Docker images locally before running the services.
+Run dashboard service:
 
 ```bash
-# Pull the images
-docker pull winyannainghtut/counting-service:latest
-docker pull winyannainghtut/dashboard-service:latest
-
-# Run the services (and build local changes)
-docker-compose up --build
+cd dashboard-service
+set PORT=80
+set COUNTING_SERVICE_URL=http://localhost:9001
+go run main.go
 ```
 
-## CI/CD Pipeline
+## CI/CD
 
-The project uses GitHub Actions for Continuous Integration and Deployment. 
+GitHub Actions workflow:
 
-- **Workflow**: `.github/workflows/ci-cd.yml`
-- **Trigger**: Pushes and Pull Requests to the `main` branch.
-- **Actions**:
-    - Builds Docker images for both services in parallel.
-    - Pushes images to Docker Hub using secrets `DOCKER_USERNAME` and `DOCKER_PASSWORD`.
+- `.github/workflows/ci-cd.yml`
 
-To view the workflow runs, navigate to the **Actions** tab in the GitHub repository.
+It builds and publishes both service images.
