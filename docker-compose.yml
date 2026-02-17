@@ -1,4 +1,15 @@
 services:
+  roach1:
+    image: cockroachdb/cockroach:latest
+    command: start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
+    ports:
+      - "26257:26257"
+      - "8081:8080"
+    volumes:
+      - roach1-data:/cockroach/cockroach-data
+    networks:
+      - demo-network
+
   counting-service:
     image: winyannainghtut/counting-service:latest
     build: ./counting-service
@@ -6,7 +17,11 @@ services:
       - "9001:9001"
     environment:
       - PORT=9001
-      - STORAGE_MODE=memory
+      - STORAGE_MODE=cockroach
+      - PG_URL=postgresql://root@roach1:26257/defaultdb?sslmode=disable
+    depends_on:
+      - roach1
+    restart: on-failure
     networks:
       - demo-network
 
@@ -20,9 +35,13 @@ services:
       - COUNTING_SERVICE_URL=http://counting-service:9001
     depends_on:
       - counting-service
+      - roach1
     networks:
       - demo-network
 
 networks:
   demo-network:
     driver: bridge
+
+volumes:
+  roach1-data:

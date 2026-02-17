@@ -22,7 +22,7 @@ function connect() {
   ws.onmessage = function (event) {
     var message = JSON.parse(event.data);
 
-    if (message.count < 0) {
+    if (message.hostname === "[Unreachable]") {
       disconnectedFromBackendService();
     } else {
       didConnect();
@@ -77,7 +77,8 @@ function showCount(message) {
   document.getElementById("hostname").textContent = message.hostname;
   document.getElementById("dashboard-hostname").textContent =
     message.dashboard_hostname;
-
+  document.getElementById("db-node").textContent =
+    message.db_node || "Unavailable";
 
 }
 
