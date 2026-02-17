@@ -60,7 +60,7 @@ services:
       - PORT=9001
       - STORAGE_MODE=postgres
       - PG_MODE=cluster
-      - PG_URL=postgres://counting:counting@pg-master:5432/counting?sslmode=disable
+      - PG_URL=postgres://counting:counting@pg-master:5432,pg-slave-1:5432,pg-slave-2:5432/counting?sslmode=disable&target_session_attrs=read-write
     depends_on:
       - pg-master
     networks:
