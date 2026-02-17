@@ -1,0 +1,113 @@
+name: dashboard-couting-consul-failover-db
+
+services:
+  consul:
+    image: hashicorp/consul:1.19
+    entrypoint:
+      - consul
+    command:
+      - agent
+      - -server
+      - -bootstrap-expect=1
+      - -node=consul-failover-db-1
+      - -ui
+      - -client=0.0.0.0
+      - -bind=0.0.0.0
+      - -data-dir=/consul/data
+      - -config-dir=/consul/config
+    ports:
+      - "19500:8500"
+      - "19600:8600/tcp"
+      - "19600:8600/udp"
+    volumes:
+      - ./consul-failover-db:/consul/config:ro
+      - consul-failover-db-data:/consul/data
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.2
+
+  roach1:
+    image: cockroachdb/cockroach:latest
+    command: start-single-node --insecure --accept-sql-without-tls --listen-addr=localhost:26257 --sql-addr=0.0.0.0:26258 --http-addr=0.0.0.0:8080
+    ports:
+      - "26267:26258"
+      - "18081:8080"
+    volumes:
+      - roach1-failover-db-data:/cockroach/cockroach-data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /cockroach/cockroach sql --insecure --host=localhost:26258 -e "SELECT 1" >/dev/null 2>&1
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.6
+
+  counting-service-1:
+    image: winyannainghtut/counting-service:latest
+    build: ./counting-service
+    ports:
+      - "9201:9001"
+    environment:
+      - PORT=9001
+      - STORAGE_MODE=cockroach
+      - PG_URL=postgresql://root@roach1:26258/defaultdb?sslmode=disable&connect_timeout=1
+      - DB_REQUEST_TIMEOUT_MS=4000
+    depends_on:
+      consul:
+        condition: service_started
+      roach1:
+        condition: service_healthy
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.3
+
+  counting-service-2:
+    image: winyannainghtut/counting-service:latest
+    build: ./counting-service
+    ports:
+      - "9202:9001"
+    environment:
+      - PORT=9001
+      - STORAGE_MODE=cockroach
+      - PG_URL=postgresql://root@roach1:26258/defaultdb?sslmode=disable&connect_timeout=1
+      - DB_REQUEST_TIMEOUT_MS=4000
+    depends_on:
+      consul:
+        condition: service_started
+      roach1:
+        condition: service_healthy
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.5
+
+  dashboard-service:
+    image: winyannainghtut/dashboard-service:latest
+    build: ./dashboard-service
+    ports:
+      - "9200:9002"
+    environment:
+      - PORT=9002
+      - COUNTING_SERVICE_URL=http://counting.service.consul:9001
+      - CONSUL_DNS_ADDR=consul:8600
+    depends_on:
+      - consul
+      - counting-service-1
+      - counting-service-2
+    networks:
+      failover-db-network:
+        ipv4_address: 172.26.0.4
+
+networks:
+  failover-db-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/24
+
+volumes:
+  consul-failover-db-data:
+  roach1-failover-db-data:

@@ -1,0 +1,15 @@
+{
+  "service": {
+    "id": "counting-2",
+    "name": "counting",
+    "address": "172.26.0.5",
+    "port": 9001,
+    "check": {
+      "id": "counting-2-check",
+      "http": "http://172.26.0.5:9001/health",
+      "method": "GET",
+      "interval": "1s",
+      "timeout": "1s"
+    }
+  }
+}
