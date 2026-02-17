@@ -23,7 +23,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const countingRequestTimeout = 4 * time.Second
 const defaultDNSNetwork = "udp"
 const defaultDNSPort = "53"
 const defaultDNSTimeout = 1500 * time.Millisecond
@@ -114,6 +113,33 @@ func normalizeDNSServerAddr(dnsServer string) string {
 	return net.JoinHostPort(dnsServer, defaultDNSPort)
 }
 
+func resolveDNSServerHostToIP(dnsServer string) string {
+	host, port, err := net.SplitHostPort(dnsServer)
+	if err != nil {
+		return dnsServer
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		return dnsServer
+	}
+
+	ips, lookupErr := net.LookupIP(host)
+	if lookupErr != nil || len(ips) == 0 {
+		log.Printf("Unable to resolve DNS server host %q: %v. Using as-is.", host, lookupErr)
+		return dnsServer
+	}
+
+	selectedIP := ips[0]
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			selectedIP = ip
+			break
+		}
+	}
+
+	return net.JoinHostPort(selectedIP.String(), port)
+}
+
 func configureCustomDNSResolver() {
 	dnsServer := getCustomDNSServer()
 	if dnsServer == "" {
@@ -121,6 +147,7 @@ func configureCustomDNSResolver() {
 	}
 
 	dnsServer = normalizeDNSServerAddr(dnsServer)
+	dnsServer = resolveDNSServerHostToIP(dnsServer)
 	dnsNetwork := getCustomDNSNetwork()
 	dnsTimeout := getCustomDNSTimeout()
 
@@ -237,7 +264,6 @@ type Count struct {
 	Message           string `json:"message"`
 	Hostname          string `json:"hostname"`
 	DashboardHostname string `json:"dashboard_hostname"`
-	DBNode            string `json:"db_node,omitempty"`
 }
 
 func getAndParseCount() (Count, error) {
@@ -248,7 +274,7 @@ func getAndParseCount() (Count, error) {
 	}
 
 	httpClient := http.Client{
-		Timeout:   countingRequestTimeout,
+		Timeout:   time.Second * 2,
 		Transport: tr,
 	}
 
