@@ -4,7 +4,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,28 +14,17 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// CounterStore defines the interface for counting storage operations.
-type CounterStore interface {
-	Incr(ctx context.Context) (int64, error)
-	GetInfo(ctx context.Context) (string, error)
-}
-
-// InMemoryStore implements CounterStore using an in-memory variable.
+// InMemoryStore implements an in-memory counter.
 type InMemoryStore struct {
 	mu    sync.Mutex
 	count int64
 }
 
-func (m *InMemoryStore) Incr(ctx context.Context) (int64, error) {
+func (m *InMemoryStore) Incr() int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.count++
-	return m.count, nil
-}
-
-func (m *InMemoryStore) GetInfo(ctx context.Context) (string, error) {
-	hostname, _ := os.Hostname()
-	return fmt.Sprintf("In-Memory (Host: %s)", hostname), nil
+	return m.count
 }
 
 func main() {
@@ -75,33 +63,18 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 type Count struct {
 	Count    int64  `json:"count"`
 	Hostname string `json:"hostname"`
-	Message  string `json:"message,omitempty"`
 }
 
 // CountHandler serves a JSON feed that contains a number that increments each time
 // the API is called.
 type CountHandler struct {
-	store CounterStore
+	store *InMemoryStore
 }
 
 func (h CountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
 	hostname, _ := os.Hostname()
 
-	// Increment the count
-	newCount, err := h.store.Incr(ctx)
-	if err != nil {
-		// Graceful degradation
-		count := Count{
-			Count:    -1,
-			Hostname: hostname,
-			Message:  fmt.Sprintf("Store Error: %v", err),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(count)
-		return
-	}
-
+	newCount := h.store.Incr()
 	count := Count{
 		Count:    newCount,
 		Hostname: hostname,
